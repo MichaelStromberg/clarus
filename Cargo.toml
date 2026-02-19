@@ -5,5 +5,8 @@ edition = "2024"
 description = "High-performance genomic variant annotation and VUS resolution engine"
 license = "GPL-3.0"
 repository = "https://github.com/MichaelStromberg/clarus"
+exclude = [
+    "docs/specifications/*"
+]
 
 [dependencies]
