@@ -76,10 +76,12 @@ impl ReferenceWriter {
 
         for (i, comp) in compressed.iter().enumerate() {
             offsets.push(current_offset);
-            let band_size =
-                Self::calculate_band_block_size(bands.get(&chromosomes[i].ensembl_name));
-            let mirna_size =
-                Self::calculate_mirna_block_size(mirna.get(&chromosomes[i].ensembl_name));
+            let band_size = Self::calculate_band_block_size(
+                bands.get(&chromosomes[i].ensembl_name).map(Vec::as_slice),
+            );
+            let mirna_size = Self::calculate_mirna_block_size(
+                mirna.get(&chromosomes[i].ensembl_name).map(Vec::as_slice),
+            );
             let block_size = 4 + 4 + comp.len() as u64 + band_size as u64 + mirna_size as u64;
             current_offset += block_size;
         }
@@ -133,13 +135,19 @@ impl ReferenceWriter {
             })?)?;
             writer.write_all(comp)?;
 
-            Self::write_bands(writer, bands.get(&chromosomes[i].ensembl_name))?;
-            Self::write_mirna_regions(writer, mirna.get(&chromosomes[i].ensembl_name))?;
+            Self::write_bands(
+                writer,
+                bands.get(&chromosomes[i].ensembl_name).map(Vec::as_slice),
+            )?;
+            Self::write_mirna_regions(
+                writer,
+                mirna.get(&chromosomes[i].ensembl_name).map(Vec::as_slice),
+            )?;
         }
         Ok(())
     }
 
-    fn write_bands<W: Write>(writer: &mut W, bands: Option<&Vec<Band>>) -> Result<(), Error> {
+    fn write_bands<W: Write>(writer: &mut W, bands: Option<&[Band]>) -> Result<(), Error> {
         if let Some(band_list) = bands {
             writer.write_u32(
                 u32::try_from(band_list.len())
@@ -158,7 +166,7 @@ impl ReferenceWriter {
 
     fn write_mirna_regions<W: Write>(
         writer: &mut W,
-        mirna: Option<&Vec<MirnaRegion>>,
+        mirna: Option<&[MirnaRegion]>,
     ) -> Result<(), Error> {
         if let Some(list) = mirna {
             writer.write_u32(
@@ -204,7 +212,7 @@ impl ReferenceWriter {
     }
 
     /// Calculate the on-disk size of a band block (count + band records).
-    fn calculate_band_block_size(bands: Option<&Vec<Band>>) -> usize {
+    fn calculate_band_block_size(bands: Option<&[Band]>) -> usize {
         let mut size = 4; // band_count (u32)
         if let Some(band_list) = bands {
             for band in band_list {
@@ -217,7 +225,7 @@ impl ReferenceWriter {
     }
 
     /// Calculate the on-disk size of a miRNA block (count + region records).
-    fn calculate_mirna_block_size(regions: Option<&Vec<MirnaRegion>>) -> usize {
+    fn calculate_mirna_block_size(regions: Option<&[MirnaRegion]>) -> usize {
         let mut size = 4; // count (u32)
         if let Some(list) = regions {
             size += list.len() * 8; // 4 (begin) + 4 (end) per region

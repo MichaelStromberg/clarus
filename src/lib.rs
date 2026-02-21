@@ -5,6 +5,7 @@ pub mod error;
 pub mod assembly_report;
 pub mod bands;
 pub mod chromosome;
+pub mod cli;
 pub mod config;
 pub mod download;
 pub mod fasta;

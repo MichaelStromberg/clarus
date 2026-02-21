@@ -24,13 +24,11 @@ pub fn filename_from_url(url: &str) -> Result<String> {
         bail!("cannot extract filename from URL: '{url}'");
     }
 
-    Ok(filename.to_string())
-}
+    if filename.contains('/') || filename.contains('\\') || filename == ".." {
+        bail!("unsafe filename extracted from URL: '{filename}'");
+    }
 
-/// Return `/tmp/{filename}` for a given URL.
-pub fn local_path_for_url(url: &str) -> Result<PathBuf> {
-    let filename = filename_from_url(url)?;
-    Ok(PathBuf::from("/tmp").join(filename))
+    Ok(filename.to_string())
 }
 
 /// Compute the MD5 hex digest of a file by streaming 64KB chunks.
@@ -53,7 +51,7 @@ pub fn compute_md5(path: &Path) -> Result<String> {
 }
 
 /// Download a file from a URL via HTTP GET, streaming to disk.
-pub fn download_file(url: &str, dest: &Path) -> Result<()> {
+fn download_file(url: &str, dest: &Path) -> Result<()> {
     let mut response = ureq::get(url)
         .call()
         .with_context(|| format!("HTTP request failed for {url}"))?;
@@ -81,7 +79,8 @@ pub struct DownloadTask {
     pub name: String,
     pub url: String,
     pub dest: PathBuf,
-    pub expected_md5: String,
+    /// `Some(hash)` — verify MD5 after download; `None` — no MD5 available, existence-only caching.
+    pub expected_md5: Option<String>,
 }
 
 /// Result of a single download attempt.
@@ -107,15 +106,8 @@ pub enum ChecksumFailure {
     },
 }
 
-impl ChecksumFailure {
-    pub fn name(&self) -> &str {
-        match self {
-            Self::Mismatch { name, .. } | Self::ReadError { name, .. } => name,
-        }
-    }
-}
-
 /// Download multiple files in parallel using std::thread.
+#[must_use]
 pub fn download_parallel(tasks: &[DownloadTask]) -> Vec<DownloadResult> {
     let handles: Vec<_> = tasks
         .iter()
@@ -153,11 +145,14 @@ pub fn download_parallel(tasks: &[DownloadTask]) -> Vec<DownloadResult> {
         .collect()
 }
 
-/// Verify MD5 checksums for a batch of files. Returns all failures.
+/// Verify MD5 checksums for a batch of files. Skips tasks with no expected MD5. Returns all failures.
+#[must_use]
 pub fn verify_checksums(tasks: &[DownloadTask]) -> Vec<ChecksumFailure> {
     tasks
         .iter()
+        .filter(|task| task.expected_md5.is_some())
         .filter_map(|task| {
+            let expected = task.expected_md5.as_ref().unwrap();
             let actual = match compute_md5(&task.dest) {
                 Ok(md5) => md5,
                 Err(e) => {
@@ -168,11 +163,11 @@ pub fn verify_checksums(tasks: &[DownloadTask]) -> Vec<ChecksumFailure> {
                     });
                 }
             };
-            if actual != task.expected_md5 {
+            if actual != *expected {
                 Some(ChecksumFailure::Mismatch {
                     name: task.name.clone(),
                     path: task.dest.clone(),
-                    expected: task.expected_md5.clone(),
+                    expected: expected.clone(),
                     actual,
                 })
             } else {
@@ -182,38 +177,99 @@ pub fn verify_checksums(tasks: &[DownloadTask]) -> Vec<ChecksumFailure> {
         .collect()
 }
 
-/// Resolve files: check existence, verify MD5, delete on mismatch, return tasks to download.
+/// Resolve pre-built download tasks: check existence and MD5, return tasks that need downloading.
 ///
-/// Uses `compute_md5` directly instead of a separate existence check to avoid TOCTOU races.
-/// Stale file removal is best-effort since `download_file` uses `File::create` which truncates.
-pub fn resolve_files(entries: &[(&str, &str, &str)]) -> Result<Vec<DownloadTask>> {
+/// - `expected_md5: Some(hash)` — skip only if file exists AND MD5 matches; remove stale on mismatch
+/// - `expected_md5: None` — skip if file exists (no MD5 available)
+#[must_use]
+pub fn resolve_tasks(tasks: &[DownloadTask]) -> Vec<DownloadTask> {
     let mut to_download = Vec::new();
 
-    for &(name, url, expected_md5) in entries {
-        let local = local_path_for_url(url)?;
-
-        let needs_download = match compute_md5(&local) {
-            Ok(actual) if actual == expected_md5 => false,
-            Ok(_) => {
-                // MD5 mismatch — attempt to remove stale file (non-fatal if removal fails,
-                // since download_file uses File::create which truncates)
-                let _ = fs::remove_file(&local);
-                true
-            }
-            Err(_) => true, // File missing or unreadable
+    for task in tasks {
+        let needs_download = match &task.expected_md5 {
+            None => !task.dest.exists(),
+            Some(expected) => match compute_md5(&task.dest) {
+                Ok(actual) if actual == *expected => false,
+                Ok(_) => {
+                    let _ = fs::remove_file(&task.dest);
+                    true
+                }
+                Err(_) => true,
+            },
         };
 
         if needs_download {
-            to_download.push(DownloadTask {
-                name: name.to_string(),
-                url: url.to_string(),
-                dest: local,
-                expected_md5: expected_md5.to_string(),
-            });
+            to_download.push(task.clone());
         }
     }
 
-    Ok(to_download)
+    to_download
+}
+
+/// Download files and verify checksums, reporting progress to stderr.
+///
+/// Creates destination directories, downloads in parallel, reports errors,
+/// then verifies MD5 checksums. Returns `Ok(())` if all downloads and
+/// checksums pass, or bails with an error description.
+pub fn download_and_verify(tasks: &[DownloadTask]) -> Result<()> {
+    use crate::cli;
+    use colored::Colorize;
+
+    // Create destination directories
+    for task in tasks {
+        if let Some(parent) = task.dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+
+    for task in tasks {
+        cli::kv(&task.name, &task.url);
+    }
+
+    let results = download_parallel(tasks);
+    let errors: Vec<_> = results.iter().filter(|r| r.error.is_some()).collect();
+
+    if !errors.is_empty() {
+        for err in &errors {
+            eprintln!(
+                "  {} {}: {}",
+                "✗".red().bold(),
+                err.name,
+                err.error.as_ref().unwrap()
+            );
+        }
+        bail!("{} download(s) failed", errors.len());
+    }
+
+    for result in &results {
+        cli::success(&format!("{} downloaded", result.name));
+    }
+
+    let failures = verify_checksums(tasks);
+    if !failures.is_empty() {
+        for f in &failures {
+            match f {
+                ChecksumFailure::Mismatch {
+                    name,
+                    expected,
+                    actual,
+                    ..
+                } => {
+                    eprintln!(
+                        "  {} {name}: expected {expected}, got {actual}",
+                        "✗".red().bold()
+                    );
+                }
+                ChecksumFailure::ReadError { name, error, .. } => {
+                    eprintln!("  {} {name}: {error}", "✗".red().bold());
+                }
+            }
+        }
+        bail!("{} checksum verification(s) failed", failures.len());
+    }
+
+    cli::success("all checksums verified");
+    Ok(())
 }
 
 #[cfg(test)]
@@ -244,9 +300,8 @@ mod tests {
     }
 
     #[test]
-    fn local_path_for_url_returns_tmp() {
-        let path = local_path_for_url("https://example.com/genome.fna.gz").unwrap();
-        assert_eq!(path, PathBuf::from("/tmp/genome.fna.gz"));
+    fn filename_from_url_rejects_path_traversal() {
+        assert!(filename_from_url("https://example.com/..").is_err());
     }
 
     #[test]
@@ -268,7 +323,7 @@ mod tests {
             name: "test".to_string(),
             url: "https://example.com/test".to_string(),
             dest: f.path().to_path_buf(),
-            expected_md5: "eb733a00c0c9d336e65691a37ab54293".to_string(),
+            expected_md5: Some("eb733a00c0c9d336e65691a37ab54293".to_string()),
         }];
 
         let failures = verify_checksums(&tasks);
@@ -285,7 +340,7 @@ mod tests {
             name: "test".to_string(),
             url: "https://example.com/test".to_string(),
             dest: f.path().to_path_buf(),
-            expected_md5: "0000000000000000000000000000dead".to_string(),
+            expected_md5: Some("0000000000000000000000000000dead".to_string()),
         }];
 
         let failures = verify_checksums(&tasks);
@@ -302,7 +357,7 @@ mod tests {
             name: "missing".to_string(),
             url: "https://example.com/missing".to_string(),
             dest: PathBuf::from("/tmp/nonexistent_clarus_test_file"),
-            expected_md5: "0000000000000000000000000000dead".to_string(),
+            expected_md5: Some("0000000000000000000000000000dead".to_string()),
         }];
 
         let failures = verify_checksums(&tasks);
@@ -310,5 +365,138 @@ mod tests {
         assert!(
             matches!(&failures[0], ChecksumFailure::ReadError { name, .. } if name == "missing")
         );
+    }
+
+    #[test]
+    fn verify_checksums_empty_md5_reports_mismatch() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(b"test data").unwrap();
+        f.flush().unwrap();
+
+        let tasks = vec![DownloadTask {
+            name: "empty_md5".to_string(),
+            url: "https://example.com/empty_md5".to_string(),
+            dest: f.path().to_path_buf(),
+            expected_md5: Some(String::new()),
+        }];
+
+        let failures = verify_checksums(&tasks);
+        assert_eq!(failures.len(), 1);
+        assert!(matches!(
+            &failures[0],
+            ChecksumFailure::Mismatch { expected, actual, .. }
+                if expected.is_empty() && actual == "eb733a00c0c9d336e65691a37ab54293"
+        ));
+    }
+
+    #[test]
+    fn verify_checksums_skips_none_md5() {
+        let tasks = vec![DownloadTask {
+            name: "no_md5".to_string(),
+            url: "https://example.com/no_md5".to_string(),
+            dest: PathBuf::from("/tmp/nonexistent_clarus_test_file"),
+            expected_md5: None,
+        }];
+
+        let failures = verify_checksums(&tasks);
+        assert!(failures.is_empty());
+    }
+
+    #[test]
+    fn resolve_tasks_missing_file() {
+        let tasks = vec![DownloadTask {
+            name: "missing".to_string(),
+            url: "https://example.com/missing".to_string(),
+            dest: PathBuf::from("/tmp/nonexistent_clarus_resolve_test"),
+            expected_md5: Some("dba0915f2560e6b9d4943fac274816b9".to_string()),
+        }];
+
+        let to_download = resolve_tasks(&tasks);
+        assert_eq!(to_download.len(), 1);
+        assert_eq!(to_download[0].name, "missing");
+    }
+
+    #[test]
+    fn resolve_tasks_cached_file() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(b"test data").unwrap();
+        f.flush().unwrap();
+
+        let tasks = vec![DownloadTask {
+            name: "cached".to_string(),
+            url: "https://example.com/cached".to_string(),
+            dest: f.path().to_path_buf(),
+            expected_md5: Some("eb733a00c0c9d336e65691a37ab54293".to_string()),
+        }];
+
+        let to_download = resolve_tasks(&tasks);
+        assert!(to_download.is_empty());
+    }
+
+    #[test]
+    fn resolve_tasks_md5_mismatch() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(b"stale data").unwrap();
+        f.flush().unwrap();
+
+        let tasks = vec![DownloadTask {
+            name: "stale".to_string(),
+            url: "https://example.com/stale".to_string(),
+            dest: f.path().to_path_buf(),
+            expected_md5: Some("0000000000000000000000000000dead".to_string()),
+        }];
+
+        let to_download = resolve_tasks(&tasks);
+        assert_eq!(to_download.len(), 1);
+        assert_eq!(to_download[0].name, "stale");
+    }
+
+    #[test]
+    fn resolve_tasks_empty_md5_always_redownloads() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(b"some content").unwrap();
+        f.flush().unwrap();
+
+        let tasks = vec![DownloadTask {
+            name: "empty_md5".to_string(),
+            url: "https://example.com/empty_md5".to_string(),
+            dest: f.path().to_path_buf(),
+            expected_md5: Some(String::new()),
+        }];
+
+        let to_download = resolve_tasks(&tasks);
+        assert_eq!(to_download.len(), 1);
+        assert_eq!(to_download[0].name, "empty_md5");
+    }
+
+    #[test]
+    fn resolve_tasks_none_md5_cached() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(b"some content").unwrap();
+        f.flush().unwrap();
+
+        let tasks = vec![DownloadTask {
+            name: "no_md5".to_string(),
+            url: "https://example.com/no_md5".to_string(),
+            dest: f.path().to_path_buf(),
+            expected_md5: None,
+        }];
+
+        let to_download = resolve_tasks(&tasks);
+        assert!(to_download.is_empty());
+    }
+
+    #[test]
+    fn resolve_tasks_none_md5_missing() {
+        let tasks = vec![DownloadTask {
+            name: "no_md5_missing".to_string(),
+            url: "https://example.com/no_md5_missing".to_string(),
+            dest: PathBuf::from("/tmp/nonexistent_clarus_none_md5_test"),
+            expected_md5: None,
+        }];
+
+        let to_download = resolve_tasks(&tasks);
+        assert_eq!(to_download.len(), 1);
+        assert_eq!(to_download[0].name, "no_md5_missing");
     }
 }

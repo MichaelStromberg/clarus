@@ -7,44 +7,41 @@
     "releaseDate": "2025-09-02",
     "gff3": {
       "url": "https://ftp.ensembl.org/pub/release-115/gff3/homo_sapiens/Homo_sapiens.GRCh38.115.gff3.gz",
-      "md5": ""
+      "md5": "5b5c27af5708567892d0f09acc76980c"
     },
     "regulatoryGff": {
       "url": "https://ftp.ensembl.org/pub/release-115/regulation/homo_sapiens/GRCh38/annotation/Homo_sapiens.GRCh38.regulatory_features.v115.gff3.gz",
-      "md5": ""
+      "md5": "8da09f79eb059ffa45cab0ef203a62de"
     },
     "geneMysql": {
       "url": "https://ftp.ensembl.org/pub/release-115/mysql/homo_sapiens_core_115_38/gene.txt.gz",
-      "md5": ""
+      "md5": "9d7e65d0a5c10a014a591d6502b646ed"
     },
     "transcriptMysql": {
       "url": "https://ftp.ensembl.org/pub/release-115/mysql/homo_sapiens_core_115_38/transcript.txt.gz",
-      "md5": ""
+      "md5": "42f381f22c80a7b656fdc636d1acbabe"
     },
     "ncrnaFasta": {
       "url": "https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/ncrna/Homo_sapiens.GRCh38.ncrna.fa.gz",
-      "md5": ""
+      "md5": "d55d5d24b076b646e098de039aaf9c75"
     },
     "cdnaFasta": {
       "url": "https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz",
-      "md5": ""
+      "md5": "7c86214edbab4901521b8eb10addfd84"
     },
     "cdsFasta": {
       "url": "https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/cds/Homo_sapiens.GRCh38.cds.all.fa.gz",
-      "md5": ""
+      "md5": "c2292081b0622576ee747301df5c9e34"
     },
     "peptideFasta": {
       "url": "https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/pep/Homo_sapiens.GRCh38.pep.all.fa.gz",
-      "md5": ""
+      "md5": "a86f65f2dead5671f56b9fd91ef3bff7"
     }
   },
   "hgnc": {
-    "json": "https://ftp.ebi.ac.uk/pub/databases/genenames/hgnc/json/hgnc_complete_set.json"
+    "url": "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
   },
-  "mito": {
-    "fasta": "https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=fasta&id=NC_012920.1"
-  },
-  "refSeq": {
+  "refseq": {
     "name": "RefSeq",
     "version": "GCF_000001405.40-RS_2025_08",
     "description": "NCBI Homo sapiens Annotation Release",

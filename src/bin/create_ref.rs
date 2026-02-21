@@ -11,8 +11,9 @@ use colored::Colorize;
 use clarus::assembly_report::parse_assembly_report;
 use clarus::bands::{Band, parse_ideogram};
 use clarus::chromosome::Chromosome;
+use clarus::cli;
 use clarus::config::ReferenceConfig;
-use clarus::download::{self, filename_from_url, local_path_for_url};
+use clarus::download::{self, DownloadTask, filename_from_url};
 use clarus::fasta::parse_fasta_gz;
 use clarus::genome_assembly::{GenomeAssembly, compute_reference_id};
 use clarus::mirna::{MirnaRegion, parse_mirna_gff3};
@@ -35,155 +36,88 @@ struct Cli {
     out: PathBuf,
 }
 
-fn banner() {
-    eprintln!();
-    eprintln!("{} {}", "Clarus".bold().cyan(), "Create Reference".dimmed());
-    eprintln!("{}", "(c) 2026 Michael Stromberg".dimmed());
-    eprintln!();
-}
-
-fn section(title: &str) {
-    let bar = "─".repeat(50);
-    eprintln!("{} {}", title.bold().blue(), bar.dimmed());
-}
-
-fn kv(key: &str, value: &str) {
-    eprintln!("  {:<20} {}", key.dimmed(), value);
-}
-
-fn success(msg: &str) {
-    eprintln!("  {} {}", "✓".green().bold(), msg);
-}
-
-fn warning(msg: &str) {
-    eprintln!("  {} {}", "⚠".yellow(), msg.yellow());
-}
-
 fn main() -> Result<()> {
     let start = Instant::now();
-    let cli = Cli::parse();
+    let cli_args = Cli::parse();
 
-    banner();
+    cli::banner("Create Reference");
 
     // ── Configuration ────────────────────────────────────
-    section("Configuration");
+    cli::section("Configuration");
 
-    let config = ReferenceConfig::from_file(&cli.config)?;
+    let config = ReferenceConfig::from_file(&cli_args.config)?;
     let assembly: GenomeAssembly = config.genome_assembly.parse()?;
     let patch_level = config.patch_level;
 
-    kv("Config", &cli.config.display().to_string());
-    kv("Assembly", &format!("{assembly}.p{patch_level}"));
+    cli::kv("Config", &cli_args.config.display().to_string());
+    cli::kv("Assembly", &format!("{assembly}.p{patch_level}"));
 
     // Compute output path: {out}/reference/{assembly}.p{patch_level}.dat
-    let ref_dir = cli.out.join("reference");
+    let ref_dir = cli_args.out.join("reference");
     fs::create_dir_all(&ref_dir)
         .with_context(|| format!("failed to create directory: {}", ref_dir.display()))?;
     let out_path = ref_dir.join(format!("{assembly}.p{patch_level}.dat"));
-    kv("Output", &out_path.display().to_string());
+    cli::kv("Output", &out_path.display().to_string());
 
     eprintln!();
 
     // ── File Resolution ──────────────────────────────────
-    section("File Resolution");
+    cli::section("File Resolution");
 
-    let entries: Vec<(&str, &str, &str)> = config
-        .file_entries()
-        .map(|(name, entry)| (name, entry.url.as_str(), entry.md5.as_str()))
-        .collect();
+    let base_dir = PathBuf::from("/tmp/create_ref").join(format!("{assembly}.p{patch_level}"));
 
-    for &(name, url, _) in &entries {
-        let local = local_path_for_url(url)?;
-        let filename = filename_from_url(url)?;
-        if local.exists() {
-            kv(name, &format!("{filename} {}", "(cached)".dimmed()));
+    let mut all_tasks: Vec<DownloadTask> = Vec::new();
+    for (name, entry) in config.file_entries() {
+        let filename = filename_from_url(&entry.url)?;
+        let dest = base_dir.join(&filename);
+        all_tasks.push(DownloadTask {
+            name: name.to_string(),
+            url: entry.url.clone(),
+            dest,
+            expected_md5: Some(entry.md5.clone()),
+        });
+    }
+
+    for task in &all_tasks {
+        let filename = task.dest.file_name().unwrap_or_default().to_string_lossy();
+        if task.dest.exists() {
+            cli::kv(&task.name, &format!("{filename} {}", "(cached)".dimmed()));
         } else {
-            kv(name, &format!("{filename} {}", "(missing)".yellow()));
+            cli::kv(&task.name, &format!("{filename} {}", "(missing)".yellow()));
         }
     }
 
-    let to_download = download::resolve_files(&entries)?;
+    let to_download = download::resolve_tasks(&all_tasks);
 
     eprintln!();
 
     // ── Downloading ──────────────────────────────────────
     if !to_download.is_empty() {
-        section("Downloading");
-
-        for task in &to_download {
-            kv(&task.name, &task.url);
-        }
-
-        let results = download::download_parallel(&to_download);
-        let errors: Vec<_> = results.iter().filter(|r| r.error.is_some()).collect();
-
-        if !errors.is_empty() {
-            for err in &errors {
-                eprintln!(
-                    "  {} {}: {}",
-                    "✗".red().bold(),
-                    err.name,
-                    err.error.as_ref().unwrap()
-                );
-            }
-            bail!("{} download(s) failed", errors.len());
-        }
-
-        for result in &results {
-            success(&format!("{} downloaded", result.name));
-        }
-
-        // Verify checksums of downloaded files
-        let failures = download::verify_checksums(&to_download);
-        if !failures.is_empty() {
-            for f in &failures {
-                match f {
-                    download::ChecksumFailure::Mismatch {
-                        name,
-                        expected,
-                        actual,
-                        ..
-                    } => {
-                        eprintln!(
-                            "  {} {name}: expected {expected}, got {actual}",
-                            "✗".red().bold()
-                        );
-                    }
-                    download::ChecksumFailure::ReadError { name, error, .. } => {
-                        eprintln!("  {} {name}: {error}", "✗".red().bold());
-                    }
-                }
-            }
-            bail!("{} checksum verification(s) failed", failures.len());
-        }
-
-        success("all checksums verified");
+        cli::section("Downloading");
+        download::download_and_verify(&to_download)?;
         eprintln!();
     }
 
     // Resolve local paths for all files
-    let assembly_report_path = local_path_for_url(&config.assembly_report.url)?;
-    let fasta_path = local_path_for_url(&config.fasta.url)?;
+    let local = |url: &str| -> Result<PathBuf> { Ok(base_dir.join(filename_from_url(url)?)) };
+    let assembly_report_path = local(&config.assembly_report.url)?;
+    let fasta_path = local(&config.fasta.url)?;
     let bands_path = config
         .ideogram
         .as_ref()
-        .map(|e| local_path_for_url(&e.url))
+        .map(|e| local(&e.url))
         .transpose()?;
-    let gff_path = config
-        .gff
-        .as_ref()
-        .map(|e| local_path_for_url(&e.url))
-        .transpose()?;
+    let gff_path = config.gff.as_ref().map(|e| local(&e.url)).transpose()?;
 
     // ── Parsing ──────────────────────────────────────────
-    section("Parsing");
+    cli::section("Parsing");
 
     let report_file =
         File::open(&assembly_report_path).context("failed to open assembly report")?;
     let report_reader = BufReader::new(report_file);
     let (chromosomes, name_to_index) = parse_assembly_report(report_reader)?;
 
-    kv(
+    cli::kv(
         "Assembly report",
         &format!(
             "{} ({} chromosomes)",
@@ -206,7 +140,7 @@ fn main() -> Result<()> {
     let fasta_file = File::open(&fasta_path).context("failed to open FASTA file")?;
     let fasta_records = parse_fasta_gz(fasta_file)?;
 
-    kv(
+    cli::kv(
         "FASTA",
         &format!(
             "{} ({} sequences)",
@@ -221,7 +155,7 @@ fn main() -> Result<()> {
         let bands_reader = BufReader::new(bands_file);
         let parsed = parse_ideogram(bands_reader)?;
         let total_bands: usize = parsed.values().map(|v| v.len()).sum();
-        kv(
+        cli::kv(
             "Bands",
             &format!(
                 "{} ({} bands across {} chromosomes)",
@@ -246,7 +180,7 @@ fn main() -> Result<()> {
             }
         }
         let total: usize = by_ensembl.values().map(|v| v.len()).sum();
-        kv(
+        cli::kv(
             "miRNA",
             &format!(
                 "{} ({} regions across {} chromosomes)",
@@ -279,20 +213,20 @@ fn main() -> Result<()> {
             sequence_map.insert(idx, seq);
             matched += 1;
         } else {
-            warning(&format!("'{accession}' not in assembly report, skipping"));
+            cli::warning(&format!("'{accession}' not in assembly report, skipping"));
             skipped += 1;
         }
     }
 
-    kv("Matched", &format!("{matched} sequences"));
+    cli::kv("Matched", &format!("{matched} sequences"));
     if skipped > 0 {
-        kv("Skipped", &format!("{skipped} sequences"));
+        cli::kv("Skipped", &format!("{skipped} sequences"));
     }
 
     eprintln!();
 
     // ── Validation ───────────────────────────────────────
-    section("Validation");
+    cli::section("Validation");
 
     if let Some(&chry_idx) = name_to_index.get("chrY")
         && let Some(chry_seq) = sequence_map.get(&chry_idx)
@@ -305,7 +239,7 @@ fn main() -> Result<()> {
                  Use an unmasked reference genome."
             );
         }
-        success(&format!(
+        cli::success(&format!(
             "chrY N-masking ({} N bases, threshold: {})",
             n_count.to_string().bold(),
             CHRY_N_MASKING_THRESHOLD
@@ -329,7 +263,7 @@ fn main() -> Result<()> {
     }
 
     if missing > 0 {
-        warning(&format!(
+        cli::warning(&format!(
             "{missing} assembly report entries have no FASTA sequence"
         ));
     }
@@ -337,15 +271,15 @@ fn main() -> Result<()> {
     eprintln!();
 
     // ── Writing ──────────────────────────────────────────
-    section("Writing");
+    cli::section("Writing");
     let reference_id = compute_reference_id(assembly, patch_level);
-    kv("Output", &out_path.display().to_string());
-    kv("Assembly", &format!("{assembly}.p{patch_level}"));
-    kv("Reference ID", &format!("0x{reference_id:08X}"));
-    kv("Chromosomes", &output_chroms.len().to_string());
+    cli::kv("Output", &out_path.display().to_string());
+    cli::kv("Assembly", &format!("{assembly}.p{patch_level}"));
+    cli::kv("Reference ID", &format!("0x{reference_id:08X}"));
+    cli::kv("Chromosomes", &output_chroms.len().to_string());
     if !mirna_map.is_empty() {
         let total_mirna: usize = mirna_map.values().map(|v| v.len()).sum();
-        kv("miRNA regions", &total_mirna.to_string());
+        cli::kv("miRNA regions", &total_mirna.to_string());
     }
 
     let mut out_file = File::create(&out_path).context("failed to create output file")?;
@@ -362,12 +296,12 @@ fn main() -> Result<()> {
     let file_size = std::fs::metadata(&out_path)
         .map(|m| perf::format_bytes(m.len()))
         .unwrap_or_default();
-    kv("File size", &file_size);
+    cli::kv("File size", &file_size);
 
     eprintln!();
 
     // ── Verification ─────────────────────────────────────
-    section("Verification");
+    cli::section("Verification");
     verify_output(
         &out_path,
         &output_chroms,
@@ -377,19 +311,7 @@ fn main() -> Result<()> {
     )?;
 
     // ── Summary ──────────────────────────────────────────
-    let elapsed = start.elapsed();
-    eprintln!();
-    eprintln!(
-        "{}  {}\n{}  {}",
-        "Time".dimmed(),
-        perf::format_elapsed(elapsed).bold(),
-        "Peak memory".dimmed(),
-        perf::peak_memory_bytes()
-            .map(perf::format_bytes)
-            .unwrap_or_else(|| "N/A".to_string())
-            .bold(),
-    );
-    eprintln!();
+    cli::print_summary(start);
     Ok(())
 }
 
@@ -481,9 +403,9 @@ fn verify_output(
         }
         parts.push(format!("assembly={}", ref_reader.assembly));
         parts.push(format!("patch={}", ref_reader.patch_level));
-        success(&parts.join(", "));
+        cli::success(&parts.join(", "));
     } else {
-        success(&format!(
+        cli::success(&format!(
             "{} chromosomes, assembly={}, patch={}",
             ref_reader.chromosomes.len(),
             ref_reader.assembly,
