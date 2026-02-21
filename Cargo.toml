@@ -10,3 +10,19 @@ exclude = [
 ]
 
 [dependencies]
+thiserror = "2"
+flate2 = "1"
+zstd = "0.13"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+colored = "3"
+sha2 = "0.10"
+libc = "0.2"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
+
+[[bench]]
+name = "reference_reader"
+harness = false
