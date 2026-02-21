@@ -5,6 +5,8 @@ pub mod error;
 pub mod assembly_report;
 pub mod bands;
 pub mod chromosome;
+pub mod config;
+pub mod download;
 pub mod fasta;
 pub mod genome_assembly;
 pub mod mirna;

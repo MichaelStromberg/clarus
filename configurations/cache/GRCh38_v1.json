@@ -1,0 +1,69 @@
+{
+  "genomeAssembly": "GRCh38",
+  "ensembl": {
+    "name": "Ensembl",
+    "version": "115",
+    "description": "Ensembl GRCh38 Release",
+    "releaseDate": "2025-09-02",
+    "gff3": {
+      "url": "https://ftp.ensembl.org/pub/release-115/gff3/homo_sapiens/Homo_sapiens.GRCh38.115.gff3.gz",
+      "md5": ""
+    },
+    "regulatoryGff": {
+      "url": "https://ftp.ensembl.org/pub/release-115/regulation/homo_sapiens/GRCh38/annotation/Homo_sapiens.GRCh38.regulatory_features.v115.gff3.gz",
+      "md5": ""
+    },
+    "geneMysql": {
+      "url": "https://ftp.ensembl.org/pub/release-115/mysql/homo_sapiens_core_115_38/gene.txt.gz",
+      "md5": ""
+    },
+    "transcriptMysql": {
+      "url": "https://ftp.ensembl.org/pub/release-115/mysql/homo_sapiens_core_115_38/transcript.txt.gz",
+      "md5": ""
+    },
+    "ncrnaFasta": {
+      "url": "https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/ncrna/Homo_sapiens.GRCh38.ncrna.fa.gz",
+      "md5": ""
+    },
+    "cdnaFasta": {
+      "url": "https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz",
+      "md5": ""
+    },
+    "cdsFasta": {
+      "url": "https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/cds/Homo_sapiens.GRCh38.cds.all.fa.gz",
+      "md5": ""
+    },
+    "peptideFasta": {
+      "url": "https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/pep/Homo_sapiens.GRCh38.pep.all.fa.gz",
+      "md5": ""
+    }
+  },
+  "hgnc": {
+    "json": "https://ftp.ebi.ac.uk/pub/databases/genenames/hgnc/json/hgnc_complete_set.json"
+  },
+  "mito": {
+    "fasta": "https://www.ncbi.nlm.nih.gov/sviewer/viewer.cgi?db=nuccore&report=fasta&id=NC_012920.1"
+  },
+  "refSeq": {
+    "name": "RefSeq",
+    "version": "GCF_000001405.40-RS_2025_08",
+    "description": "NCBI Homo sapiens Annotation Release",
+    "releaseDate": "2025-08-06",
+    "genbank": {
+      "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/annotation_releases/9606/GCF_000001405.40-RS_2025_08/GCF_000001405.40_GRCh38.p14_rna.gbff.gz",
+      "md5": "dba0915f2560e6b9d4943fac274816b9"
+    },
+    "gff3": {
+      "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/annotation_releases/9606/GCF_000001405.40-RS_2025_08/GCF_000001405.40_GRCh38.p14_genomic.gff.gz",
+      "md5": "24b731562b9d4cae9e37b23404b5be16"
+    },
+    "rnaFasta": {
+      "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/annotation_releases/9606/GCF_000001405.40-RS_2025_08/GCF_000001405.40_GRCh38.p14_rna.fna.gz",
+      "md5": "b4a2ce202c90c0f24f22850c6bc7d774"
+    },
+    "proteinFasta": {
+      "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/annotation_releases/9606/GCF_000001405.40-RS_2025_08/GCF_000001405.40_GRCh38.p14_protein.faa.gz",
+      "md5": "25a880236608ad046d7f9b65e895eb4b"
+    }
+  }
+}

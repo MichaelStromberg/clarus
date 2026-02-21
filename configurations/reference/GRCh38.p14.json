@@ -1,0 +1,20 @@
+{
+  "genomeAssembly": "GRCh38",
+  "patchLevel": 14,
+  "assemblyReport": {
+    "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/annotation_releases/9606/GCF_000001405.40-RS_2025_08/GCF_000001405.40_GRCh38.p14_assembly_report.txt",
+    "md5": "21f3ac4aa8245a99eb874082051b9dde"
+  },
+  "fasta": {
+    "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/annotation_releases/9606/GCF_000001405.40-RS_2025_08/GCF_000001405.40_GRCh38.p14_genomic.fna.gz",
+    "md5": "c30471567037b2b2389d43c908c653e1"
+  },
+  "gff": {
+    "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/annotation_releases/9606/GCF_000001405.40-RS_2025_08/GCF_000001405.40_GRCh38.p14_genomic.gff.gz",
+    "md5": "24b731562b9d4cae9e37b23404b5be16"
+  },
+  "ideogram": {
+    "url": "https://ftp.ncbi.nlm.nih.gov/pub/gdp/ideogram_9606_GCF_000001305.16_850_V1",
+    "md5": "043761ad1c7ba3c101d2423090603f60"
+  }
+}

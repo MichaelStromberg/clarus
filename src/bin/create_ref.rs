@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -11,6 +11,8 @@ use colored::Colorize;
 use clarus::assembly_report::parse_assembly_report;
 use clarus::bands::{Band, parse_ideogram};
 use clarus::chromosome::Chromosome;
+use clarus::config::ReferenceConfig;
+use clarus::download::{self, filename_from_url, local_path_for_url};
 use clarus::fasta::parse_fasta_gz;
 use clarus::genome_assembly::{GenomeAssembly, compute_reference_id};
 use clarus::mirna::{MirnaRegion, parse_mirna_gff3};
@@ -24,33 +26,13 @@ const CHRY_N_MASKING_THRESHOLD: usize = 33_720_001;
 #[derive(Parser)]
 #[command(name = "create_ref", about = "Create a Clarus reference sequence file")]
 struct Cli {
-    /// Path to the NCBI genome assembly report file
-    #[arg(short = 'a', long = "assembly-report")]
-    assembly_report: PathBuf,
+    /// Path to the JSON configuration file
+    #[arg(short = 'c', long = "config")]
+    config: PathBuf,
 
-    /// Path to the gzip-compressed FASTA file
-    #[arg(short = 'f', long = "fasta")]
-    fasta: PathBuf,
-
-    /// Path to the NCBI GDP ideogram file (cytogenetic bands)
-    #[arg(short = 'b', long = "bands")]
-    bands: Option<PathBuf>,
-
-    /// Path to a gzip-compressed GFF3 file (for miRNA regions)
-    #[arg(long = "gff")]
-    gff: Option<PathBuf>,
-
-    /// Output reference file path
+    /// Output data directory
     #[arg(short = 'o', long = "out")]
     out: PathBuf,
-
-    /// Genome assembly name (GRCh37 or GRCh38)
-    #[arg(short = 'g', long = "assembly", default_value = "GRCh38")]
-    assembly: String,
-
-    /// Assembly patch level
-    #[arg(short = 'p', long = "patch-level", default_value_t = 14)]
-    patch_level: u8,
 }
 
 fn banner() {
@@ -81,14 +63,123 @@ fn main() -> Result<()> {
     let start = Instant::now();
     let cli = Cli::parse();
 
-    let assembly: GenomeAssembly = cli.assembly.parse()?;
-
     banner();
+
+    // ── Configuration ────────────────────────────────────
+    section("Configuration");
+
+    let config = ReferenceConfig::from_file(&cli.config)?;
+    let assembly: GenomeAssembly = config.genome_assembly.parse()?;
+    let patch_level = config.patch_level;
+
+    kv("Config", &cli.config.display().to_string());
+    kv("Assembly", &format!("{assembly}.p{patch_level}"));
+
+    // Compute output path: {out}/reference/{assembly}.p{patch_level}.dat
+    let ref_dir = cli.out.join("reference");
+    fs::create_dir_all(&ref_dir)
+        .with_context(|| format!("failed to create directory: {}", ref_dir.display()))?;
+    let out_path = ref_dir.join(format!("{assembly}.p{patch_level}.dat"));
+    kv("Output", &out_path.display().to_string());
+
+    eprintln!();
+
+    // ── File Resolution ──────────────────────────────────
+    section("File Resolution");
+
+    let entries: Vec<(&str, &str, &str)> = config
+        .file_entries()
+        .map(|(name, entry)| (name, entry.url.as_str(), entry.md5.as_str()))
+        .collect();
+
+    for &(name, url, _) in &entries {
+        let local = local_path_for_url(url)?;
+        let filename = filename_from_url(url)?;
+        if local.exists() {
+            kv(name, &format!("{filename} {}", "(cached)".dimmed()));
+        } else {
+            kv(name, &format!("{filename} {}", "(missing)".yellow()));
+        }
+    }
+
+    let to_download = download::resolve_files(&entries)?;
+
+    eprintln!();
+
+    // ── Downloading ──────────────────────────────────────
+    if !to_download.is_empty() {
+        section("Downloading");
+
+        for task in &to_download {
+            kv(&task.name, &task.url);
+        }
+
+        let results = download::download_parallel(&to_download);
+        let errors: Vec<_> = results.iter().filter(|r| r.error.is_some()).collect();
+
+        if !errors.is_empty() {
+            for err in &errors {
+                eprintln!(
+                    "  {} {}: {}",
+                    "✗".red().bold(),
+                    err.name,
+                    err.error.as_ref().unwrap()
+                );
+            }
+            bail!("{} download(s) failed", errors.len());
+        }
+
+        for result in &results {
+            success(&format!("{} downloaded", result.name));
+        }
+
+        // Verify checksums of downloaded files
+        let failures = download::verify_checksums(&to_download);
+        if !failures.is_empty() {
+            for f in &failures {
+                match f {
+                    download::ChecksumFailure::Mismatch {
+                        name,
+                        expected,
+                        actual,
+                        ..
+                    } => {
+                        eprintln!(
+                            "  {} {name}: expected {expected}, got {actual}",
+                            "✗".red().bold()
+                        );
+                    }
+                    download::ChecksumFailure::ReadError { name, error, .. } => {
+                        eprintln!("  {} {name}: {error}", "✗".red().bold());
+                    }
+                }
+            }
+            bail!("{} checksum verification(s) failed", failures.len());
+        }
+
+        success("all checksums verified");
+        eprintln!();
+    }
+
+    // Resolve local paths for all files
+    let assembly_report_path = local_path_for_url(&config.assembly_report.url)?;
+    let fasta_path = local_path_for_url(&config.fasta.url)?;
+    let bands_path = config
+        .ideogram
+        .as_ref()
+        .map(|e| local_path_for_url(&e.url))
+        .transpose()?;
+    let gff_path = config
+        .gff
+        .as_ref()
+        .map(|e| local_path_for_url(&e.url))
+        .transpose()?;
 
     // ── Parsing ──────────────────────────────────────────
     section("Parsing");
 
-    let report_file = File::open(&cli.assembly_report).context("failed to open assembly report")?;
+    let report_file =
+        File::open(&assembly_report_path).context("failed to open assembly report")?;
     let report_reader = BufReader::new(report_file);
     let (chromosomes, name_to_index) = parse_assembly_report(report_reader)?;
 
@@ -96,7 +187,7 @@ fn main() -> Result<()> {
         "Assembly report",
         &format!(
             "{} ({} chromosomes)",
-            cli.assembly_report.display(),
+            assembly_report_path.display(),
             chromosomes.len()
         ),
     );
@@ -112,21 +203,21 @@ fn main() -> Result<()> {
         }
     }
 
-    let fasta_file = File::open(&cli.fasta).context("failed to open FASTA file")?;
+    let fasta_file = File::open(&fasta_path).context("failed to open FASTA file")?;
     let fasta_records = parse_fasta_gz(fasta_file)?;
 
     kv(
         "FASTA",
         &format!(
             "{} ({} sequences)",
-            cli.fasta.display(),
+            fasta_path.display(),
             fasta_records.len()
         ),
     );
 
     // Parse bands if provided
-    let bands_map: HashMap<String, Vec<Band>> = if let Some(ref bands_path) = cli.bands {
-        let bands_file = File::open(bands_path).context("failed to open bands file")?;
+    let bands_map: HashMap<String, Vec<Band>> = if let Some(ref bp) = bands_path {
+        let bands_file = File::open(bp).context("failed to open bands file")?;
         let bands_reader = BufReader::new(bands_file);
         let parsed = parse_ideogram(bands_reader)?;
         let total_bands: usize = parsed.values().map(|v| v.len()).sum();
@@ -134,7 +225,7 @@ fn main() -> Result<()> {
             "Bands",
             &format!(
                 "{} ({} bands across {} chromosomes)",
-                bands_path.display(),
+                bp.display(),
                 total_bands,
                 parsed.len()
             ),
@@ -145,8 +236,8 @@ fn main() -> Result<()> {
     };
 
     // Parse miRNA regions if provided
-    let mirna_map: HashMap<String, Vec<MirnaRegion>> = if let Some(ref gff_path) = cli.gff {
-        let gff_file = File::open(gff_path).context("failed to open GFF3 file")?;
+    let mirna_map: HashMap<String, Vec<MirnaRegion>> = if let Some(ref gp) = gff_path {
+        let gff_file = File::open(gp).context("failed to open GFF3 file")?;
         let parsed = parse_mirna_gff3(gff_file)?;
         let mut by_ensembl: HashMap<String, Vec<MirnaRegion>> = HashMap::new();
         for (accession, regions) in parsed {
@@ -159,7 +250,7 @@ fn main() -> Result<()> {
             "miRNA",
             &format!(
                 "{} ({} regions across {} chromosomes)",
-                gff_path.display(),
+                gp.display(),
                 total,
                 by_ensembl.len()
             ),
@@ -247,9 +338,9 @@ fn main() -> Result<()> {
 
     // ── Writing ──────────────────────────────────────────
     section("Writing");
-    let reference_id = compute_reference_id(assembly, cli.patch_level);
-    kv("Output", &cli.out.display().to_string());
-    kv("Assembly", &format!("{assembly}.p{}", cli.patch_level));
+    let reference_id = compute_reference_id(assembly, patch_level);
+    kv("Output", &out_path.display().to_string());
+    kv("Assembly", &format!("{assembly}.p{patch_level}"));
     kv("Reference ID", &format!("0x{reference_id:08X}"));
     kv("Chromosomes", &output_chroms.len().to_string());
     if !mirna_map.is_empty() {
@@ -257,18 +348,18 @@ fn main() -> Result<()> {
         kv("miRNA regions", &total_mirna.to_string());
     }
 
-    let mut out_file = File::create(&cli.out).context("failed to create output file")?;
+    let mut out_file = File::create(&out_path).context("failed to create output file")?;
     ReferenceWriter::write(
         &mut out_file,
         assembly,
-        cli.patch_level,
+        patch_level,
         &output_chroms,
         &output_sequences,
         &bands_map,
         &mirna_map,
     )?;
 
-    let file_size = std::fs::metadata(&cli.out)
+    let file_size = std::fs::metadata(&out_path)
         .map(|m| perf::format_bytes(m.len()))
         .unwrap_or_default();
     kv("File size", &file_size);
@@ -278,7 +369,7 @@ fn main() -> Result<()> {
     // ── Verification ─────────────────────────────────────
     section("Verification");
     verify_output(
-        &cli.out,
+        &out_path,
         &output_chroms,
         reference_id,
         &bands_map,
