@@ -1,6 +1,7 @@
 //! RNA and protein sequence dictionaries for transcript construction.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::io::Read;
 
 use crate::error::Error;
@@ -17,12 +18,17 @@ impl RnaSequences {
         let entries = fasta::parse_fasta_gz(reader)?;
         let mut sequences = HashMap::with_capacity(entries.len());
         for (id, seq) in entries {
-            if sequences.contains_key(&id) {
-                return Err(Error::Validation(format!(
-                    "duplicate transcript ID in RNA FASTA: {id}"
-                )));
+            match sequences.entry(id) {
+                Entry::Occupied(e) => {
+                    return Err(Error::Validation(format!(
+                        "duplicate transcript ID in RNA FASTA: {}",
+                        e.key()
+                    )));
+                }
+                Entry::Vacant(e) => {
+                    e.insert(seq);
+                }
             }
-            sequences.insert(id, seq);
         }
         Ok(Self { sequences })
     }
@@ -31,6 +37,11 @@ impl RnaSequences {
     #[must_use]
     pub fn get(&self, transcript_id: &str) -> Option<&[u8]> {
         self.sequences.get(transcript_id).map(|v| v.as_slice())
+    }
+
+    /// Remove and return a cDNA sequence by transcript ID, transferring ownership.
+    pub fn remove(&mut self, transcript_id: &str) -> Option<Vec<u8>> {
+        self.sequences.remove(transcript_id)
     }
 
     /// Get a mutable reference to the inner map for mitochondrial sequence insertion.
@@ -69,27 +80,36 @@ impl ProteinSequences {
             // Append stop codon
             seq.push(b'*');
 
-            if sequences.contains_key(&primary_id) {
-                return Err(Error::Validation(format!(
-                    "duplicate protein ID in protein FASTA: {primary_id}"
-                )));
-            }
-
-            // Parse transcript cross-reference from header
-            if let Some(pos) = header.find(" transcript:") {
-                let rest = &header[pos + 12..]; // skip " transcript:"
-                let tid = rest.split_whitespace().next().unwrap_or("");
-                if !tid.is_empty() {
-                    if transcript_to_protein.contains_key(tid) {
-                        return Err(Error::Validation(format!(
-                            "duplicate transcript ID in protein FASTA cross-reference: {tid}"
-                        )));
+            // Check duplicate protein ID before inserting cross-references
+            match sequences.entry(primary_id) {
+                Entry::Occupied(e) => {
+                    return Err(Error::Validation(format!(
+                        "duplicate protein ID in protein FASTA: {}",
+                        e.key()
+                    )));
+                }
+                Entry::Vacant(e) => {
+                    // Parse transcript cross-reference from header
+                    if let Some(pos) = header.find(" transcript:") {
+                        let rest = &header[pos + 12..]; // skip " transcript:"
+                        let tid = rest.split_whitespace().next().unwrap_or("");
+                        if !tid.is_empty() {
+                            match transcript_to_protein.entry(tid.to_string()) {
+                                Entry::Occupied(te) => {
+                                    return Err(Error::Validation(format!(
+                                        "duplicate transcript ID in protein FASTA cross-reference: {}",
+                                        te.key()
+                                    )));
+                                }
+                                Entry::Vacant(te) => {
+                                    te.insert(e.key().clone());
+                                }
+                            }
+                        }
                     }
-                    transcript_to_protein.insert(tid.to_string(), primary_id.clone());
+                    e.insert(seq);
                 }
             }
-
-            sequences.insert(primary_id, seq);
         }
 
         Ok(Self {

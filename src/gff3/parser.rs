@@ -17,7 +17,10 @@ pub enum ParsedLine {
     EndOfSection,
 }
 
-/// Attribute keys that are recognized but silently ignored.
+/// Attribute keys that are recognized but not needed for transcript construction or evaluation.
+/// These are metadata fields from RefSeq/Ensembl GFF3 (alignment stats, cross-references,
+/// feature annotations) that don't affect the cache output. Unknown keys are treated as errors
+/// to catch schema changes, so all expected keys must be listed here or parsed above.
 static SKIPPED_KEYS: LazyLock<std::collections::HashSet<&'static str>> = LazyLock::new(|| {
     [
         "align_id",

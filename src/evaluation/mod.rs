@@ -119,26 +119,14 @@ fn evaluate_single(
         return Ok(());
     }
 
-    // Level 2-3: Semi-global alignment
+    let max_edits = if is_selenoprotein { 10 } else { 2 };
+
+    // Level 2-3: Semi-global alignment (forward)
     if let Some(result) = alignment::semi_global_align(&expected, &translated) {
         let edits = find_amino_acid_edits(&expected, &translated, result.start);
-        let max_edits = if is_selenoprotein { 10 } else { 2 };
-
-        if edits.is_empty() {
-            // Level 2: Contained (no edits)
-            coding.protein_offset = result.start as u16;
-            stats.num_contained += 1;
+        if try_accept_alignment(coding, edits, result.start as u16, max_edits, stats) {
             return Ok(());
         }
-
-        if edits.len() <= max_edits {
-            // Level 3: AA edits
-            coding.protein_offset = result.start as u16;
-            coding.amino_acid_edits = Some(edits);
-            stats.num_with_amino_acid_edits += 1;
-            return Ok(());
-        }
-        // Too many edits — fall through to try lower levels
     }
 
     // Level 2-3 reverse: translated longer than expected (e.g., extra AA at start)
@@ -146,21 +134,9 @@ fn evaluate_single(
         && let Some(result) = alignment::semi_global_align(&translated, &expected)
     {
         let edits = find_amino_acid_edits_reverse(&expected, &translated, result.start);
-        let max_edits = if is_selenoprotein { 10 } else { 2 };
-
-        if edits.is_empty() {
-            coding.protein_offset = 0;
-            stats.num_contained += 1;
+        if try_accept_alignment(coding, edits, 0, max_edits, stats) {
             return Ok(());
         }
-
-        if edits.len() <= max_edits {
-            coding.protein_offset = 0;
-            coding.amino_acid_edits = Some(edits);
-            stats.num_with_amino_acid_edits += 1;
-            return Ok(());
-        }
-        // Too many edits — fall through to try lower levels
     }
 
     // Level 4: Translational slippage
@@ -349,6 +325,28 @@ fn dump_unresolvable_diagnostics(
             cli::kv("Frame +2", &String::from_utf8_lossy(&frame2));
         }
     }
+}
+
+/// Try to accept an alignment result at Level 2-3.
+/// Returns `true` if accepted (contained or AA edits within limit).
+fn try_accept_alignment(
+    coding: &mut CodingRegion,
+    edits: Vec<AminoAcidEdit>,
+    protein_offset: u16,
+    max_edits: usize,
+    stats: &mut EvaluationStats,
+) -> bool {
+    if edits.len() > max_edits {
+        return false;
+    }
+    coding.protein_offset = protein_offset;
+    if edits.is_empty() {
+        stats.num_contained += 1;
+    } else {
+        coding.amino_acid_edits = Some(edits);
+        stats.num_with_amino_acid_edits += 1;
+    }
+    true
 }
 
 /// Apply frame correction results to a coding region.

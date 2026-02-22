@@ -18,10 +18,8 @@ pub fn build_transcript_regions(
 ) -> Result<Vec<TranscriptRegion>, Error> {
     let mut regions = if !matches.is_empty() {
         build_cigar_aware(matches, strand)?
-    } else if strand.is_reverse() {
-        build_reverse(exons)
     } else {
-        build_forward(exons)
+        build_exon_regions(exons, strand)
     };
 
     // Insert introns between consecutive exons
@@ -30,41 +28,18 @@ pub fn build_transcript_regions(
     Ok(regions)
 }
 
-/// Forward strand exon normalization.
-fn build_forward(exons: &[Gff3Entry]) -> Vec<TranscriptRegion> {
+/// Build exon regions with cDNA coordinates assigned in transcript order.
+///
+/// Forward strand: exons sorted ascending by genomic start (5'→3' matches genome).
+/// Reverse strand: exons sorted descending by genomic start (5'→3' is opposite to genome),
+/// then re-sorted ascending for output.
+fn build_exon_regions(exons: &[Gff3Entry], strand: Strand) -> Vec<TranscriptRegion> {
     let mut sorted: Vec<&Gff3Entry> = exons.iter().collect();
-    sorted.sort_by_key(|e| e.start);
-
-    let mut regions = Vec::with_capacity(sorted.len());
-    let mut cdna_start: i32 = 1;
-    let mut id: u16 = 1;
-
-    for exon in sorted {
-        let genomic_length = exon.end - exon.start;
-        let cdna_end = cdna_start + genomic_length;
-
-        regions.push(TranscriptRegion {
-            region_type: TranscriptRegionType::Exon,
-            id,
-            genomic_start: exon.start,
-            genomic_end: exon.end,
-            cdna_start,
-            cdna_end,
-            cigar_ops: None,
-        });
-
-        cdna_start = cdna_end + 1;
-        id += 1;
+    if strand.is_reverse() {
+        sorted.sort_by(|a, b| b.start.cmp(&a.start));
+    } else {
+        sorted.sort_by_key(|e| e.start);
     }
-
-    regions
-}
-
-/// Reverse strand exon normalization.
-fn build_reverse(exons: &[Gff3Entry]) -> Vec<TranscriptRegion> {
-    let mut sorted: Vec<&Gff3Entry> = exons.iter().collect();
-    // Sort descending by start for cDNA assignment (5'→3' in transcript order)
-    sorted.sort_by(|a, b| b.start.cmp(&a.start));
 
     let mut regions = Vec::with_capacity(sorted.len());
     let mut cdna_start: i32 = 1;
@@ -88,8 +63,9 @@ fn build_reverse(exons: &[Gff3Entry]) -> Vec<TranscriptRegion> {
         id += 1;
     }
 
-    // Re-sort by ascending genomic start for output
-    regions.sort_by_key(|r| r.genomic_start);
+    if strand.is_reverse() {
+        regions.sort_by_key(|r| r.genomic_start);
+    }
     regions
 }
 
@@ -211,10 +187,9 @@ fn insert_introns(regions: &mut Vec<TranscriptRegion>, strand: Strand) {
     // Sort by genomic start to find gaps
     regions.sort_by_key(|r| r.genomic_start);
 
-    let exons: Vec<TranscriptRegion> = regions.clone();
     let mut introns = Vec::new();
 
-    for window in exons.windows(2) {
+    for window in regions.windows(2) {
         let prev = &window[0];
         let curr = &window[1];
         let gap = curr.genomic_start - prev.genomic_end - 1;

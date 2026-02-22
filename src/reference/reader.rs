@@ -232,7 +232,7 @@ mod tests {
             &bands,
             &mirna,
         )
-        .unwrap();
+        .expect("failed to write test reference file");
         buf.into_inner()
     }
 
@@ -291,7 +291,7 @@ mod tests {
             &bands,
             &mirna,
         )
-        .unwrap();
+        .expect("failed to write test reference file");
         buf.into_inner()
     }
 

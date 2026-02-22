@@ -208,12 +208,18 @@ pub fn parse_genbank<R: BufRead>(reader: R) -> Result<HashMap<String, CdsRecord>
         }
 
         if let Some(record) = cds_record {
-            if results.contains_key(&transcript_id) {
-                return Err(Error::Parse(format!(
-                    "duplicate GenBank transcript ID: {transcript_id}"
-                )));
+            use std::collections::hash_map::Entry;
+            match results.entry(transcript_id) {
+                Entry::Occupied(e) => {
+                    return Err(Error::Parse(format!(
+                        "duplicate GenBank transcript ID: {}",
+                        e.key()
+                    )));
+                }
+                Entry::Vacant(e) => {
+                    e.insert(record);
+                }
             }
-            results.insert(transcript_id, record);
         }
     }
 }

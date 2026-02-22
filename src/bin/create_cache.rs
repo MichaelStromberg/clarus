@@ -168,7 +168,7 @@ fn main() -> Result<()> {
         // 3. Parse RNA FASTA
         let rna_file = File::open(&rna_path)
             .with_context(|| format!("failed to open RNA FASTA: {}", rna_path.display()))?;
-        let rna_sequences = RnaSequences::from_gz(rna_file)?;
+        let mut rna_sequences = RnaSequences::from_gz(rna_file)?;
         cli::kv("RNA FASTA", &format!("{} sequences", rna_sequences.len()));
 
         // 4. Parse Protein FASTA
@@ -213,9 +213,10 @@ fn main() -> Result<()> {
                     .as_deref()
                     .unwrap_or(&tx_entry.attributes.id);
 
-                // Look up cDNA sequence
-                let cdna_seq = match rna_sequences.get(tx_name) {
-                    Some(seq) => seq.to_vec(),
+                // Take ownership of cDNA sequence to avoid copying.
+                // Each tx_name appears at most once across all GFF3 gene→transcript entries.
+                let cdna_seq = match rna_sequences.remove(tx_name) {
+                    Some(seq) => seq,
                     None => {
                         skipped_no_rna += 1;
                         continue;
