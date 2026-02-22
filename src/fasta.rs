@@ -16,6 +16,59 @@ pub fn parse_fasta_gz<R: Read>(reader: R) -> Result<Vec<(String, Vec<u8>)>, Erro
     parse_fasta(buf_reader)
 }
 
+/// Reads gzip-compressed FASTA and yields (primary_id, full_header, sequence) triples.
+///
+/// The primary ID is the first whitespace-delimited token after `>`.
+/// The full header is the entire line after `>` (untrimmed).
+pub fn parse_fasta_gz_with_headers<R: Read>(
+    reader: R,
+) -> Result<Vec<(String, String, Vec<u8>)>, Error> {
+    let decoder = GzDecoder::new(reader);
+    let buf_reader = BufReader::new(decoder);
+    parse_fasta_with_headers(buf_reader)
+}
+
+/// Reads FASTA and yields (primary_id, full_header, sequence) triples.
+fn parse_fasta_with_headers<R: BufRead>(
+    reader: R,
+) -> Result<Vec<(String, String, Vec<u8>)>, Error> {
+    let mut results: Vec<(String, String, Vec<u8>)> = Vec::new();
+    let mut current_id: Option<String> = None;
+    let mut current_header: Option<String> = None;
+    let mut current_sequence: Vec<u8> = Vec::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        if let Some(header_text) = line.strip_prefix('>') {
+            if let (Some(id), Some(header)) = (current_id.take(), current_header.take()) {
+                results.push((id, header, current_sequence));
+                current_sequence = Vec::new();
+            }
+            let primary_id = header_text
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if primary_id.is_empty() {
+                return Err(Error::Parse(format!("empty FASTA header: {line}")));
+            }
+            current_id = Some(primary_id);
+            current_header = Some(header_text.to_string());
+        } else if current_id.is_some() {
+            let trimmed = line.trim();
+            let start = current_sequence.len();
+            current_sequence.extend_from_slice(trimmed.as_bytes());
+            current_sequence[start..].make_ascii_uppercase();
+        }
+    }
+
+    if let (Some(id), Some(header)) = (current_id, current_header) {
+        results.push((id, header, current_sequence));
+    }
+
+    Ok(results)
+}
+
 /// Reads FASTA from a buffered reader and yields (accession, sequence) pairs.
 fn parse_fasta<R: BufRead>(reader: R) -> Result<Vec<(String, Vec<u8>)>, Error> {
     let mut results: Vec<(String, Vec<u8>)> = Vec::new();

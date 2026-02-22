@@ -20,4 +20,9 @@ pub enum Error {
     /// A file format error was detected.
     #[error("{0}")]
     Format(String),
+
+    /// A transcript that could not be resolved during evaluation.
+    /// These are excluded from the cache rather than causing a fatal error.
+    #[error("unresolvable transcript: {0}")]
+    UnresolvableTranscript(String),
 }
