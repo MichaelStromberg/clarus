@@ -235,19 +235,22 @@ fn parse_cds_range(content: &str) -> Result<(i32, i32), Error> {
             .split(',')
             .next()
             .ok_or_else(|| Error::Parse(format!("empty join in CDS: '{content}'")))?;
-        let last_range = inner.split(',').next_back().unwrap();
+        let last_range = inner
+            .split(',')
+            .next_back()
+            .ok_or_else(|| Error::Parse(format!("empty join in CDS: '{content}'")))?;
 
         let start: i32 = first_range
             .split("..")
             .next()
-            .unwrap()
+            .ok_or_else(|| Error::Parse(format!("missing start in CDS range: '{first_range}'")))?
             .trim()
             .parse()
             .map_err(|e| Error::Parse(format!("invalid CDS join start: {e}")))?;
         let end: i32 = last_range
             .split("..")
             .last()
-            .unwrap()
+            .ok_or_else(|| Error::Parse(format!("missing end in CDS range: '{last_range}'")))?
             .trim()
             .parse()
             .map_err(|e| Error::Parse(format!("invalid CDS join end: {e}")))?;

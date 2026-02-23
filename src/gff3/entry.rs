@@ -37,6 +37,14 @@ pub struct Gff3Attributes {
     pub note: Option<String>,
     pub pubmed_ids: Option<Vec<i32>>,
     pub eco_id: Option<i32>,
+    /// Ensembl CDS protein_id attribute.
+    pub protein_id: Option<String>,
+    /// Ensembl version attribute (integer version number).
+    pub version: Option<u16>,
+    /// Ensembl biotype attribute from column 9 (distinct from column 3 SO type).
+    pub biotype_attr: Option<String>,
+    /// Ensembl canonical transcript flag (from `tag=Ensembl_canonical`).
+    pub is_ensembl_canonical: bool,
 }
 
 /// A single parsed GFF3 entry (one line).

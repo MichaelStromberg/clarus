@@ -58,6 +58,27 @@ impl RnaSequences {
     pub fn is_empty(&self) -> bool {
         self.sequences.is_empty()
     }
+
+    /// Merge another `RnaSequences` into this one.
+    ///
+    /// Used for Ensembl where coding (cdna) and non-coding (ncrna) FASTA files
+    /// are separate and must be combined. Duplicate IDs produce an error.
+    pub fn merge(&mut self, other: RnaSequences) -> Result<(), Error> {
+        for (id, seq) in other.sequences {
+            match self.sequences.entry(id) {
+                Entry::Occupied(e) => {
+                    return Err(Error::Validation(format!(
+                        "duplicate transcript ID when merging RNA FASTA: {}",
+                        e.key()
+                    )));
+                }
+                Entry::Vacant(e) => {
+                    e.insert(seq);
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Protein sequence dictionary with transcript cross-reference.

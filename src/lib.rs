@@ -15,6 +15,7 @@ pub mod fasta;
 pub mod genbank;
 pub mod genome_assembly;
 pub mod gff3;
+pub mod hgnc;
 pub mod mirna;
 pub mod perf;
 pub mod reference;

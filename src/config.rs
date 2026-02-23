@@ -88,8 +88,6 @@ pub struct EnsemblConfig {
     pub release_date: String,
     pub gff3: FileEntry,
     pub regulatory_gff: FileEntry,
-    pub gene_mysql: FileEntry,
-    pub transcript_mysql: FileEntry,
     pub ncrna_fasta: FileEntry,
     pub cdna_fasta: FileEntry,
     pub cds_fasta: FileEntry,
@@ -101,8 +99,6 @@ impl EnsemblConfig {
         [
             ("gff3", &self.gff3),
             ("regulatory_gff", &self.regulatory_gff),
-            ("gene_mysql", &self.gene_mysql),
-            ("transcript_mysql", &self.transcript_mysql),
             ("ncrna_fasta", &self.ncrna_fasta),
             ("cdna_fasta", &self.cdna_fasta),
             ("cds_fasta", &self.cds_fasta),
@@ -265,8 +261,6 @@ mod tests {
             "name": "Ensembl", "version": "115", "description": "test", "releaseDate": "2025-09-02",
             "gff3": { "url": "https://example.com/e1.gz", "md5": "" },
             "regulatoryGff": { "url": "https://example.com/e2.gz", "md5": "" },
-            "geneMysql": { "url": "https://example.com/e3.gz", "md5": "" },
-            "transcriptMysql": { "url": "https://example.com/e4.gz", "md5": "" },
             "ncrnaFasta": { "url": "https://example.com/e5.gz", "md5": "" },
             "cdnaFasta": { "url": "https://example.com/e6.gz", "md5": "" },
             "cdsFasta": { "url": "https://example.com/e7.gz", "md5": "" },
@@ -301,8 +295,8 @@ mod tests {
         assert_eq!(config.genome_assembly, "GRCh38");
         assert!(config.ensembl.is_some());
         assert!(config.refseq.is_some());
-        // 8 ensembl + 4 refseq = 12
-        assert_eq!(config.file_entries().count(), 12);
+        // 6 ensembl + 4 refseq = 10
+        assert_eq!(config.file_entries().count(), 10);
     }
 
     #[test]
@@ -379,7 +373,7 @@ mod tests {
         let f = write_config(&json);
         let config = CacheConfig::from_file(f.path()).unwrap();
         assert!(config.ensembl.is_some());
-        // All 8 ensembl entries have empty MD5 — validation should pass
-        assert_eq!(config.file_entries().count(), 8);
+        // All 6 ensembl entries have empty MD5 — validation should pass
+        assert_eq!(config.file_entries().count(), 6);
     }
 }

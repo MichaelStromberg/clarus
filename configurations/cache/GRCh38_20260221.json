@@ -13,14 +13,6 @@
       "url": "https://ftp.ensembl.org/pub/release-115/regulation/homo_sapiens/GRCh38/annotation/Homo_sapiens.GRCh38.regulatory_features.v115.gff3.gz",
       "md5": "8da09f79eb059ffa45cab0ef203a62de"
     },
-    "geneMysql": {
-      "url": "https://ftp.ensembl.org/pub/release-115/mysql/homo_sapiens_core_115_38/gene.txt.gz",
-      "md5": "9d7e65d0a5c10a014a591d6502b646ed"
-    },
-    "transcriptMysql": {
-      "url": "https://ftp.ensembl.org/pub/release-115/mysql/homo_sapiens_core_115_38/transcript.txt.gz",
-      "md5": "42f381f22c80a7b656fdc636d1acbabe"
-    },
     "ncrnaFasta": {
       "url": "https://ftp.ensembl.org/pub/release-115/fasta/homo_sapiens/ncrna/Homo_sapiens.GRCh38.ncrna.fa.gz",
       "md5": "d55d5d24b076b646e098de039aaf9c75"

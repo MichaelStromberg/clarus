@@ -231,8 +231,16 @@ pub fn detect_coding_region(
     }
 
     // Find overall CDS genomic boundaries
-    let genomic_start = cds_entries.iter().map(|c| c.start).min().unwrap();
-    let genomic_end = cds_entries.iter().map(|c| c.end).max().unwrap();
+    let genomic_start = cds_entries
+        .iter()
+        .map(|c| c.start)
+        .min()
+        .ok_or_else(|| Error::Parse("CDS entries empty after is_empty check".to_string()))?;
+    let genomic_end = cds_entries
+        .iter()
+        .map(|c| c.end)
+        .max()
+        .ok_or_else(|| Error::Parse("CDS entries empty after is_empty check".to_string()))?;
 
     // Map to cDNA coordinates (strand-aware)
     let (map_start, map_end) = if strand.is_reverse() {

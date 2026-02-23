@@ -1,5 +1,7 @@
 //! Transcript data model types for intermediate representation.
 
+use std::sync::Arc;
+
 use crate::biotype::BioType;
 use crate::gff3::entry::CigarOp;
 use crate::strand::Strand;
@@ -81,7 +83,7 @@ pub struct IntermediateTranscript {
     pub biotype: BioType,
     pub source: Source,
     pub strand: Strand,
-    pub gene: Gene,
+    pub gene: Arc<Gene>,
     pub transcript_regions: Vec<TranscriptRegion>,
     pub coding_region: Option<CodingRegion>,
     pub cdna_seq: Vec<u8>,

@@ -111,7 +111,12 @@ fn evaluate_single(
         )));
     }
     let cds = &cdna[cds_start..cds_end];
-    let translated = codon::translate(cds, table);
+    let mut translated = codon::translate(cds, table);
+
+    // Strip trailing X (incomplete codon artifacts from CDS length not multiple of 3)
+    while translated.last() == Some(&b'X') {
+        translated.pop();
+    }
 
     // Level 1: Perfect match
     if translated == expected {
@@ -577,17 +582,13 @@ mod tests {
         let cdna = cdna_vec.as_slice();
 
         // Expected protein: M + 20xA + U + U + 10xA + *
-        let mut expected = Vec::new();
-        expected.push(b'M');
-        for _ in 0..20 {
-            expected.push(b'A');
-        }
-        expected.push(b'U');
-        expected.push(b'U');
-        for _ in 0..10 {
-            expected.push(b'A');
-        }
-        expected.push(b'*');
+        let expected: Vec<u8> = [b'M']
+            .into_iter()
+            .chain(std::iter::repeat_n(b'A', 20))
+            .chain([b'U', b'U'])
+            .chain(std::iter::repeat_n(b'A', 10))
+            .chain([b'*'])
+            .collect();
 
         let cds_len = cdna.len() as i32;
         let mut coding = CodingRegion {
@@ -642,18 +643,13 @@ mod tests {
         cdna_vec.extend_from_slice(b"TAA"); // *
         let cdna = cdna_vec.as_slice();
 
-        let mut expected = Vec::new();
-        expected.push(b'M');
-        for _ in 0..20 {
-            expected.push(b'A');
-        }
-        expected.push(b'W');
-        expected.push(b'W');
-        expected.push(b'W');
-        for _ in 0..5 {
-            expected.push(b'A');
-        }
-        expected.push(b'*');
+        let expected: Vec<u8> = [b'M']
+            .into_iter()
+            .chain(std::iter::repeat_n(b'A', 20))
+            .chain([b'W', b'W', b'W'])
+            .chain(std::iter::repeat_n(b'A', 5))
+            .chain([b'*'])
+            .collect();
 
         let cds_len = cdna.len() as i32;
         let mut coding = CodingRegion {
@@ -697,6 +693,8 @@ mod tests {
 
     #[test]
     fn unresolvable_transcript_is_skipped() {
+        use std::sync::Arc;
+
         use crate::biotype::BioType;
         use crate::chromosome::Chromosome;
         use crate::strand::Strand;
@@ -728,14 +726,14 @@ mod tests {
             biotype: BioType::MRna,
             source: Source::RefSeq,
             strand: Strand::Forward,
-            gene: Gene {
+            gene: Arc::new(Gene {
                 chromosome_index: 0,
                 symbol: "FAKE".to_string(),
                 ncbi_gene_id: None,
                 ensembl_id: None,
                 hgnc_id: None,
                 on_reverse_strand: false,
-            },
+            }),
             transcript_regions: Vec::new(),
             coding_region: Some(coding),
             cdna_seq: cdna,
@@ -1076,7 +1074,7 @@ mod tests {
         );
 
         // Falls through instead of erroring — returns Ok(false)
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[test]
@@ -1267,12 +1265,11 @@ mod tests {
         // - Frame correction (padding=1) produces correct match + trailing X
 
         // Expected protein: M + 73*A + * + (extra to pad) = long
-        let mut expected = Vec::new();
-        expected.push(b'M');
-        for _ in 0..73 {
-            expected.push(b'A');
-        }
-        expected.push(b'*');
+        let mut expected: Vec<u8> = [b'M']
+            .into_iter()
+            .chain(std::iter::repeat_n(b'A', 73))
+            .chain([b'*'])
+            .collect();
         assert_eq!(expected.len(), 75);
 
         // Build adjusted CDS (after prepending 1 base) that translates to:
@@ -1354,12 +1351,11 @@ mod tests {
         let table = CodonTable::standard();
 
         // Expected protein: M + A*58 + * = 60 chars
-        let mut expected = Vec::new();
-        expected.push(b'M');
-        for _ in 0..58 {
-            expected.push(b'A');
-        }
-        expected.push(b'*');
+        let expected: Vec<u8> = [b'M']
+            .into_iter()
+            .chain(std::iter::repeat_n(b'A', 58))
+            .chain([b'*'])
+            .collect();
         assert_eq!(expected.len(), 60);
 
         // Build adjusted CDS: G + A*19 + * + G = 22 codons = 66 bytes
@@ -1463,5 +1459,82 @@ mod tests {
         assert_eq!(stats.num_wrong_frame, 1);
         assert_eq!(stats.num_contained, 1);
         assert_eq!(coding.protein_offset, 1);
+    }
+
+    #[test]
+    fn trailing_x_stripped_resolves_as_contained() {
+        // CDS = 8 bytes (not a multiple of 3). Translates to MGX (trailing X from
+        // incomplete codon). After stripping X → MG. Expected = MG*. MG is shorter
+        // than MG* → semi_global_align finds MG contained within MG* at offset 0.
+        //
+        // ATG GGT GG → M G X (8 bytes, 2 complete codons + 2 leftover)
+        let cdna = b"ATGGGTGG";
+        let expected = b"MG*".to_vec();
+
+        let mut coding = CodingRegion {
+            genomic_start: 1,
+            genomic_end: 8,
+            cdna_start: 1,
+            cdna_end: 8,
+            protein_id: "ENSTEST.1".to_string(),
+            protein_seq: expected,
+            cds_padding: 0,
+            cds_offset: 0,
+            protein_offset: 0,
+            amino_acid_edits: None,
+            slip: None,
+        };
+
+        let table = CodonTable::standard();
+        let mut stats = EvaluationStats::default();
+        evaluate_single(
+            &mut coding,
+            cdna,
+            &table,
+            false,
+            false,
+            "ENST_TEST.1",
+            &mut stats,
+        )
+        .unwrap();
+        assert_eq!(stats.num_contained, 1);
+    }
+
+    #[test]
+    fn short_trailing_x_single_aa() {
+        // CDS = 5 bytes. Translates to MX. After stripping → M.
+        // Expected = M*. M is contained within M*.
+        //
+        // ATG GG → M X (5 bytes, 1 complete codon + 2 leftover)
+        let cdna = b"ATGGG";
+        let expected = b"M*".to_vec();
+
+        let mut coding = CodingRegion {
+            genomic_start: 1,
+            genomic_end: 5,
+            cdna_start: 1,
+            cdna_end: 5,
+            protein_id: "ENSTEST.1".to_string(),
+            protein_seq: expected,
+            cds_padding: 0,
+            cds_offset: 0,
+            protein_offset: 0,
+            amino_acid_edits: None,
+            slip: None,
+        };
+
+        let table = CodonTable::standard();
+        let mut stats = EvaluationStats::default();
+        evaluate_single(
+            &mut coding,
+            cdna,
+            &table,
+            false,
+            false,
+            "ENST_TEST.1",
+            &mut stats,
+        )
+        .unwrap();
+        assert_eq!(stats.num_contained, 1);
     }
 }

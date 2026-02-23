@@ -1,4 +1,4 @@
-//! GFF3 parent-child hierarchy builder.
+//! RefSeq GFF3 parent-child hierarchy builder.
 
 use std::collections::HashMap;
 
@@ -7,8 +7,8 @@ use crate::error::Error;
 
 use super::entry::{GeneRecord, Gff3Entry, Gff3Result, MatchRecord, TranscriptRecord};
 
-/// Builds a gene-transcript-exon hierarchy from flat GFF3 entries.
-pub struct HierarchyBuilder {
+/// Builds a gene-transcript-exon hierarchy from flat RefSeq GFF3 entries.
+pub struct RefSeqHierarchyBuilder {
     /// All entries stored by index.
     entries: Vec<Gff3Entry>,
     /// ID key → entry index in `entries`.
@@ -29,13 +29,13 @@ pub struct HierarchyBuilder {
     regulatory_regions: Vec<Gff3Entry>,
 }
 
-impl Default for HierarchyBuilder {
+impl Default for RefSeqHierarchyBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl HierarchyBuilder {
+impl RefSeqHierarchyBuilder {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
@@ -161,14 +161,21 @@ impl HierarchyBuilder {
     }
 
     /// Consume the builder and produce the final GFF3 result.
-    pub fn build(mut self) -> Gff3Result {
+    pub fn build(mut self) -> Result<Gff3Result, Error> {
         let mut genes = Vec::with_capacity(self.gene_indices.len());
 
-        // We need to take entries out by index. Build a vec of Option to allow taking.
+        // Take entries out by index using Option vec.
         let mut entries: Vec<Option<Gff3Entry>> = self.entries.drain(..).map(Some).collect();
 
+        let take = |entries: &mut [Option<Gff3Entry>], i: usize| -> Result<Gff3Entry, Error> {
+            entries
+                .get_mut(i)
+                .and_then(|slot| slot.take())
+                .ok_or_else(|| Error::Parse(format!("missing GFF3 entry at index {i}")))
+        };
+
         for &gene_idx in &self.gene_indices {
-            let gene_entry = entries[gene_idx].take().unwrap();
+            let gene_entry = take(&mut entries, gene_idx)?;
             let transcript_indices = self
                 .transcript_children
                 .remove(&gene_idx)
@@ -176,31 +183,28 @@ impl HierarchyBuilder {
 
             let mut transcripts = Vec::with_capacity(transcript_indices.len());
             for tx_idx in transcript_indices {
-                let tx_entry = entries[tx_idx].take().unwrap();
+                let tx_entry = take(&mut entries, tx_idx)?;
 
                 let exon_indices = self.exon_children.remove(&tx_idx).unwrap_or_default();
-                let exons: Vec<Gff3Entry> = exon_indices
-                    .into_iter()
-                    .map(|i| entries[i].take().unwrap())
-                    .collect();
+                let mut exons = Vec::with_capacity(exon_indices.len());
+                for i in exon_indices {
+                    exons.push(take(&mut entries, i)?);
+                }
 
                 let cds_indices = self.cds_children.remove(&tx_idx).unwrap_or_default();
-                let cds_entries: Vec<Gff3Entry> = cds_indices
-                    .into_iter()
-                    .map(|i| entries[i].take().unwrap())
-                    .collect();
+                let mut cds_entries = Vec::with_capacity(cds_indices.len());
+                for i in cds_indices {
+                    cds_entries.push(take(&mut entries, i)?);
+                }
 
                 let match_indices = self.match_children.remove(&tx_idx).unwrap_or_default();
-                let matches: Vec<MatchRecord> = match_indices
-                    .into_iter()
-                    .map(|i| {
-                        let match_entry = entries[i].take().unwrap();
-                        MatchRecord {
-                            entry: match_entry,
-                            exons: Vec::new(), // Populated during construction
-                        }
-                    })
-                    .collect();
+                let mut matches = Vec::with_capacity(match_indices.len());
+                for i in match_indices {
+                    matches.push(MatchRecord {
+                        entry: take(&mut entries, i)?,
+                        exons: Vec::new(), // Populated during construction
+                    });
+                }
 
                 transcripts.push(TranscriptRecord {
                     entry: tx_entry,
@@ -216,10 +220,10 @@ impl HierarchyBuilder {
             });
         }
 
-        Gff3Result {
+        Ok(Gff3Result {
             genes,
             regulatory_regions: self.regulatory_regions,
-        }
+        })
     }
 }
 
@@ -280,7 +284,7 @@ mod tests {
 
     #[test]
     fn simple_gene_transcript_exon() {
-        let mut builder = HierarchyBuilder::new();
+        let mut builder = RefSeqHierarchyBuilder::new();
 
         // Gene
         builder
@@ -338,7 +342,7 @@ mod tests {
         exon2.attributes.transcript_id = Some("NR_046018.2".to_string());
         builder.add(exon2).unwrap();
 
-        let result = builder.build();
+        let result = builder.build().unwrap();
         assert_eq!(result.genes.len(), 1);
         assert_eq!(result.genes[0].transcripts.len(), 1);
         assert_eq!(result.genes[0].transcripts[0].exons.len(), 2);
@@ -346,7 +350,7 @@ mod tests {
 
     #[test]
     fn regulatory_separation() {
-        let mut builder = HierarchyBuilder::new();
+        let mut builder = RefSeqHierarchyBuilder::new();
         builder
             .add(make_entry(
                 0,
@@ -375,7 +379,7 @@ mod tests {
         };
         builder.add(reg).unwrap();
 
-        let result = builder.build();
+        let result = builder.build().unwrap();
         assert_eq!(result.genes.len(), 1);
         assert_eq!(result.regulatory_regions.len(), 1);
         assert_eq!(result.regulatory_regions[0].biotype, BioType::Enhancer);
@@ -383,7 +387,7 @@ mod tests {
 
     #[test]
     fn xm_transcript_skipped() {
-        let mut builder = HierarchyBuilder::new();
+        let mut builder = RefSeqHierarchyBuilder::new();
         builder
             .add(make_entry(
                 0,
@@ -410,13 +414,13 @@ mod tests {
             ))
             .unwrap();
 
-        let result = builder.build();
+        let result = builder.build().unwrap();
         assert_eq!(result.genes[0].transcripts.len(), 0);
     }
 
     #[test]
     fn duplicate_id_error() {
-        let mut builder = HierarchyBuilder::new();
+        let mut builder = RefSeqHierarchyBuilder::new();
         builder
             .add(make_entry(
                 0,
@@ -444,7 +448,7 @@ mod tests {
 
     #[test]
     fn missing_parent_error() {
-        let mut builder = HierarchyBuilder::new();
+        let mut builder = RefSeqHierarchyBuilder::new();
         let result = builder.add(make_entry(
             0,
             BioType::Exon,

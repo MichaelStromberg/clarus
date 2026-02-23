@@ -268,3 +268,33 @@ All 11 previously unresolvable transcripts now resolve via frame correction:
 | **Unresolvable** | **11** | **0** | **-11** |
 
 The +11 wrong_frame matches the 11 previously unresolvable transcripts, all now resolved. The shift from AA edits to contained (+26/-15) reflects improved alignment quality from the preprocessing (fewer spurious post-stop mismatches). Zero regressions in slippage or perfect protein counts.
+
+---
+
+## Phase 6: Ensembl Unresolvable Transcripts
+
+After Phase 5 resolved all RefSeq unresolvable transcripts, the Ensembl pipeline reported 35 unresolvable transcripts. All 35 have identifiable root causes and fall into two categories.
+
+### Category 1: CDS length not a multiple of 3 (30 transcripts)
+
+When the CDS length is not a multiple of 3, `codon::translate` produces a trailing `X` for the incomplete codon. The evaluation hierarchy at Levels 1-3 compared the X-bearing translation against the expected protein. For example, expected `MG*` vs translated `MGX` — the trailing `X` prevented a match at any level.
+
+Phase 5 already added trailing X stripping to `try_frame_correction` (Levels 5-6), but not to the main `evaluate_single` path (Levels 1-3). Since these transcripts are in the correct reading frame (no padding needed), they never reached Levels 5-6.
+
+**Fix:** Strip trailing `X` characters from the translated protein immediately after `codon::translate` in `evaluate_single`, before entering the 7-level comparison hierarchy. After stripping, `MGX` becomes `MG`, which is shorter than `MG*` and resolves as "contained" at Level 2 via semi-global alignment.
+
+### Category 2: Selenoprotein detection missing for Ensembl (5 transcripts)
+
+Five SELENOP (Selenoprotein P) transcript isoforms had 2-10 `U→*` differences (TGA codons encoding selenocysteine). These exceeded the non-selenoprotein edit limit of 2 and were marked unresolvable.
+
+**Root cause:** Ensembl genes were constructed with `hgnc_id: None` in `create_cache.rs`, so `selenoprotein::is_selenoprotein()` always returned false. Without selenoprotein detection, the max_edits limit was 2 instead of 10.
+
+**Fix:** Added `src/hgnc.rs` module that parses `hgnc_complete_set.txt` (plain TSV) and builds an Ensembl gene ID → HGNC numeric ID lookup. Column 0 (`hgnc_id`, format `HGNC:nnnnn`) maps to Column 19 (`ensembl_gene_id`). The lookup is wired into the Ensembl pipeline in `create_cache.rs` to populate `hgnc_id` on Ensembl gene records.
+
+With HGNC IDs populated, SELENOP (HGNC:10751, ENSG00000250722) is detected as a selenoprotein, and its 5 transcript isoforms resolve as "AA edits" at Levels 2-3 with the elevated max_edits=10 threshold.
+
+### Phase 6 Outcome
+
+- 30 trailing-X transcripts resolve as "contained" at Level 2
+- 5 SELENOP transcripts resolve as "AA edits" at Level 2-3
+- Ensembl unresolvable drops from 35 to 0

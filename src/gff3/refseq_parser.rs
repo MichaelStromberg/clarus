@@ -1,4 +1,4 @@
-//! GFF3 line and attribute parser.
+//! RefSeq GFF3 line and attribute parser.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
