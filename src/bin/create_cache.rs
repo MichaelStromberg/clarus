@@ -138,7 +138,8 @@ fn main() -> Result<()> {
     eprintln!();
 
     // Ensure output directory exists
-    std::fs::create_dir_all(&cli_args.out)?;
+    let cache_dir = cli_args.out.join("cache");
+    std::fs::create_dir_all(&cache_dir)?;
 
     // ── Pipelines ────────────────────────────────────────
     if let Some(ref refseq) = config.refseq {
@@ -147,7 +148,7 @@ fn main() -> Result<()> {
             ref_reader: &mut ref_reader,
             hgnc_db: &hgnc_db,
             base_dir: &base_dir,
-            out_dir: &cli_args.out,
+            out_dir: &cache_dir,
             assembly,
         };
         pipeline::refseq::run(&mut ctx, refseq)?;
@@ -158,7 +159,7 @@ fn main() -> Result<()> {
             ref_reader: &mut ref_reader,
             hgnc_db: &hgnc_db,
             base_dir: &base_dir,
-            out_dir: &cli_args.out,
+            out_dir: &cache_dir,
             assembly,
         };
         pipeline::ensembl::run(&mut ctx, ensembl_config)?;

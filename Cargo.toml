@@ -22,6 +22,18 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 md-5 = "0.10"
 ureq = "3"
+noodles-bgzf = { version = "0.46", features = ["libdeflate"] }
+bgzip = { version = "0.3", default-features = false, features = ["rust_backend"] }
+gzp = { version = "2", default-features = false, features = ["libdeflate", "deflate_rust"] }
+libdeflater = "1"
+rayon = "1"
+comfy-table = "7"
+bytecount = "0.6"
+
+[features]
+default = []
+bench-zlib-rs = ["flate2/zlib-rs"]
+bench-zlib-ng = ["flate2/zlib-ng-compat"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -29,4 +41,8 @@ tempfile = "3"
 
 [[bench]]
 name = "reference_reader"
+harness = false
+
+[[bench]]
+name = "bgzf_benchmark"
 harness = false
