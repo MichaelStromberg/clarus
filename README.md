@@ -98,6 +98,29 @@ For GRCh38: processes 105,006 transcripts (78,422 coding, 26,584 non-coding) wit
 
 Example configuration files are in `configurations/cache/`.
 
+### Benchmarks (`benches/`)
+
+**`bgzf_benchmark`** — Benchmarks BGZF decompression approaches to find the fastest strategy for VCF parsing.
+
+```
+Usage: cargo bench --bench bgzf_benchmark -- -i <INPUT> [--flate2-only] [-n <ITERATIONS>]
+
+Options:
+  -i, --input <PATH>       BGZF-compressed file (e.g., .vcf.gz)
+  --flate2-only            Only run the flate2 benchmark (for testing different backends)
+  -n, --iterations <N>     Iterations per approach (default: 5)
+```
+
+Compares 7 approaches: flate2 (with swappable miniz_oxide/zlib-rs/zlib-ng backends), noodles-bgzf, bgzip, gzp, and manual BGZF parsing with libdeflater — both single-threaded and parallel (rayon). Feature flags switch the flate2 backend:
+
+```bash
+cargo bench --bench bgzf_benchmark -- -i file.vcf.gz                          # full suite
+cargo bench --bench bgzf_benchmark --features bench-zlib-rs -- -i file.vcf.gz --flate2-only
+cargo bench --bench bgzf_benchmark --features bench-zlib-ng -- -i file.vcf.gz --flate2-only
+```
+
+Results on a 951 MB 3-sample WGS VCF (Apple M3 Max, 14 cores): manual BGZF + libdeflater + rayon achieves **11.4x** speedup over flate2 baseline (0.42s vs 4.76s). Full results in [`docs/clarus/fast_bgzf_parsing.md`](docs/clarus/fast_bgzf_parsing.md).
+
 ## Current Status
 
 **Active development.** The build-time pipeline is functional: `create_ref` produces reference files and `create_cache` constructs transcript caches with full protein validation. The runtime annotation engine is not yet started.
@@ -114,6 +137,7 @@ Example configuration files are in `configurations/cache/`.
 - 102 Sequence Ontology biotype classifications
 - Standard and vertebrate mitochondrial codon translation
 - Selenoprotein detection for relaxed evaluation thresholds
+- BGZF decompression benchmarking (7 approaches, 3 flate2 backends) with parallel rayon strategy selected
 
 ## License
 
