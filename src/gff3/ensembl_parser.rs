@@ -3,12 +3,9 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::biotype::{BioType, BioTypeCategory};
 use crate::error::Error;
-use crate::strand::Strand;
 
-use super::entry::{Gff3Attributes, Gff3Entry};
-use super::refseq_parser::ParsedLine;
+use super::entry::{Gff3Attributes, ParsedLine, parse_gff3_line};
 
 /// Attribute keys that are recognized but not needed for transcript construction or evaluation.
 /// These are metadata fields from Ensembl GFF3 that don't affect the cache output. Unknown keys
@@ -42,76 +39,7 @@ static SKIPPED_KEYS: LazyLock<std::collections::HashSet<&'static str>> = LazyLoc
 
 /// Parse a single Ensembl GFF3 line into a structured entry.
 pub fn parse_line(line: &str, name_to_index: &HashMap<String, usize>) -> Result<ParsedLine, Error> {
-    // Comments and directives
-    if line.starts_with('#') {
-        if line == "###" {
-            return Ok(ParsedLine::EndOfSection);
-        }
-        return Ok(ParsedLine::Comment);
-    }
-
-    let line = line.trim();
-    if line.is_empty() {
-        return Ok(ParsedLine::Comment);
-    }
-
-    // Split into 9 tab columns
-    let columns: Vec<&str> = line.split('\t').collect();
-    if columns.len() != 9 {
-        return Err(Error::Parse(format!(
-            "GFF3 line has {} columns, expected 9",
-            columns.len()
-        )));
-    }
-
-    // Column 1: chromosome
-    let chr_name = columns[0];
-    let chromosome_index = match name_to_index.get(chr_name) {
-        Some(&idx) => idx,
-        None => return Ok(ParsedLine::Discarded),
-    };
-
-    // Column 3: biotype (strict — unknown type is an error)
-    let biotype: BioType = columns[2].parse()?;
-
-    // Discard not-useful and unsupported
-    let category = biotype.category();
-    if matches!(
-        category,
-        BioTypeCategory::NotUseful | BioTypeCategory::Unsupported
-    ) {
-        return Ok(ParsedLine::Discarded);
-    }
-
-    // Column 4 & 5: start and end
-    let start: i32 = columns[3]
-        .parse()
-        .map_err(|e| Error::Parse(format!("invalid start '{}': {e}", columns[3])))?;
-    let end: i32 = columns[4]
-        .parse()
-        .map_err(|e| Error::Parse(format!("invalid end '{}': {e}", columns[4])))?;
-
-    // Column 7: strand
-    let strand = Strand::from_gff3(columns[6]);
-
-    // Column 9: attributes
-    let attributes = parse_attributes(columns[8])?;
-
-    // ID is required for non-discarded entries
-    if attributes.id.is_empty() {
-        return Err(Error::Parse(format!(
-            "GFF3 entry missing required ID attribute: {line}"
-        )));
-    }
-
-    Ok(ParsedLine::Entry(Box::new(Gff3Entry {
-        chromosome_index,
-        start,
-        end,
-        biotype,
-        strand,
-        attributes,
-    })))
+    parse_gff3_line(line, name_to_index, parse_attributes)
 }
 
 /// Parse Ensembl GFF3 column 9 attributes.
@@ -147,7 +75,14 @@ fn parse_attributes(attrs_str: &str) -> Result<Gff3Attributes, Error> {
             }
             "biotype" => attrs.biotype_attr = Some(value.to_string()),
             "tag" => {
-                attrs.is_ensembl_canonical = value.split(',').any(|t| t == "Ensembl_canonical");
+                for t in value.split(',') {
+                    match t {
+                        "Ensembl_canonical" => attrs.designations.is_ensembl_canonical = true,
+                        "MANE_Select" => attrs.designations.is_mane_select = true,
+                        "MANE_Plus_Clinical" => attrs.designations.is_mane_plus_clinical = true,
+                        _ => {}
+                    }
+                }
             }
             "ensembl_phase" => {} // recognized but not used
             "exon_id" => exon_id = Some(value),
@@ -175,6 +110,8 @@ fn parse_attributes(attrs_str: &str) -> Result<Gff3Attributes, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::biotype::BioType;
+    use crate::strand::Strand;
 
     fn test_name_map() -> HashMap<String, usize> {
         let mut m = HashMap::new();
@@ -310,7 +247,37 @@ mod tests {
         let result = parse_line(line, &test_name_map()).unwrap();
         match result {
             ParsedLine::Entry(e) => {
-                assert!(e.attributes.is_ensembl_canonical);
+                assert!(e.attributes.designations.is_ensembl_canonical);
+                assert!(!e.attributes.designations.is_mane_select);
+                assert!(!e.attributes.designations.is_mane_plus_clinical);
+            }
+            _ => panic!("expected Entry"),
+        }
+    }
+
+    #[test]
+    fn ensembl_mane_select_tag_parsed() {
+        let line = "1\tensembl\tmRNA\t69091\t70008\t.\t+\t.\tID=transcript:ENST00000335137;Parent=gene:ENSG00000186092;transcript_id=ENST00000335137;biotype=protein_coding;tag=gencode_basic,Ensembl_canonical,MANE_Select;version=4";
+        let result = parse_line(line, &test_name_map()).unwrap();
+        match result {
+            ParsedLine::Entry(e) => {
+                assert!(e.attributes.designations.is_ensembl_canonical);
+                assert!(e.attributes.designations.is_mane_select);
+                assert!(!e.attributes.designations.is_mane_plus_clinical);
+            }
+            _ => panic!("expected Entry"),
+        }
+    }
+
+    #[test]
+    fn ensembl_mane_plus_clinical_tag_parsed() {
+        let line = "1\tensembl\tmRNA\t69091\t70008\t.\t+\t.\tID=transcript:ENST00000335137;Parent=gene:ENSG00000186092;transcript_id=ENST00000335137;biotype=protein_coding;tag=gencode_basic,MANE_Plus_Clinical;version=4";
+        let result = parse_line(line, &test_name_map()).unwrap();
+        match result {
+            ParsedLine::Entry(e) => {
+                assert!(!e.attributes.designations.is_ensembl_canonical);
+                assert!(!e.attributes.designations.is_mane_select);
+                assert!(e.attributes.designations.is_mane_plus_clinical);
             }
             _ => panic!("expected Entry"),
         }
@@ -322,7 +289,9 @@ mod tests {
         let result = parse_line(line, &test_name_map()).unwrap();
         match result {
             ParsedLine::Entry(e) => {
-                assert!(!e.attributes.is_ensembl_canonical);
+                assert!(!e.attributes.designations.is_ensembl_canonical);
+                assert!(!e.attributes.designations.is_mane_select);
+                assert!(!e.attributes.designations.is_mane_plus_clinical);
             }
             _ => panic!("expected Entry"),
         }

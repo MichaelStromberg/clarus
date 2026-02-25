@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use crate::error::Error;
 
 /// Extension trait for writing little-endian binary values.
-pub(super) trait BinaryWrite: Write {
+pub(crate) trait BinaryWrite: Write {
     fn write_u8(&mut self, value: u8) -> Result<(), Error> {
         self.write_all(&[value])?;
         Ok(())
@@ -37,10 +37,22 @@ pub(super) trait BinaryWrite: Write {
         self.write_all(s.as_bytes())?;
         Ok(())
     }
+
+    fn write_u16_prefixed_string(&mut self, s: &str) -> Result<(), Error> {
+        let len = s.len();
+        if len > u16::MAX as usize {
+            return Err(Error::Validation(format!(
+                "string too long for u16 prefix: {len} bytes"
+            )));
+        }
+        self.write_all(&(len as u16).to_le_bytes())?;
+        self.write_all(s.as_bytes())?;
+        Ok(())
+    }
 }
 
 /// Extension trait for reading little-endian binary values.
-pub(super) trait BinaryRead: Read {
+pub(crate) trait BinaryRead: Read {
     fn read_u8(&mut self) -> Result<u8, Error> {
         let mut buf = [0u8; 1];
         self.read_exact(&mut buf)?;
@@ -67,6 +79,17 @@ pub(super) trait BinaryRead: Read {
 
     fn read_prefixed_string(&mut self) -> Result<String, Error> {
         let len = self.read_u8()? as usize;
+        if len == 0 {
+            return Ok(String::new());
+        }
+        let mut buf = vec![0u8; len];
+        self.read_exact(&mut buf)?;
+        String::from_utf8(buf).map_err(|e| Error::Parse(format!("invalid UTF-8: {e}")))
+    }
+
+    #[allow(dead_code)] // Reader counterpart of write_u16_prefixed_string, used by cache reader
+    fn read_u16_prefixed_string(&mut self) -> Result<String, Error> {
+        let len = self.read_u16()? as usize;
         if len == 0 {
             return Ok(String::new());
         }

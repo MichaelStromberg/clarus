@@ -14,9 +14,8 @@ use flate2::read::GzDecoder;
 use crate::biotype::BioTypeCategory;
 use crate::error::Error;
 
-use entry::{Gff3Entry, Gff3Result};
+use entry::{Gff3Entry, Gff3Result, ParsedLine};
 use refseq_hierarchy::RefSeqHierarchyBuilder;
-use refseq_parser::ParsedLine;
 
 /// Parse a gzip-compressed RefSeq GFF3 file into a structured hierarchy.
 pub fn parse_refseq_gff3_gz<R: Read>(
@@ -42,7 +41,7 @@ pub fn parse_refseq_gff3<R: BufRead>(
             .map_err(|e| Error::Parse(format!("{e} (line {line_num}: {line})")))?
         {
             ParsedLine::Entry(entry) => builder.add(*entry)?,
-            ParsedLine::Discarded | ParsedLine::Comment => continue,
+            ParsedLine::Discarded | ParsedLine::Comment => {}
             ParsedLine::EndOfSection => break,
         }
     }
@@ -74,8 +73,7 @@ pub fn parse_ensembl_gff3<R: BufRead>(
             .map_err(|e| Error::Parse(format!("{e} (line {line_num}: {line})")))?
         {
             ParsedLine::Entry(entry) => builder.add(*entry)?,
-            ParsedLine::Discarded | ParsedLine::Comment => continue,
-            ParsedLine::EndOfSection => continue,
+            ParsedLine::Discarded | ParsedLine::Comment | ParsedLine::EndOfSection => {}
         }
     }
 
@@ -105,7 +103,7 @@ pub fn parse_regulatory_gff3_gz<R: Read>(
                     regions.push(*entry);
                 }
             }
-            ParsedLine::Discarded | ParsedLine::Comment | ParsedLine::EndOfSection => continue,
+            ParsedLine::Discarded | ParsedLine::Comment | ParsedLine::EndOfSection => {}
         }
     }
 

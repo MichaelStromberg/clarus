@@ -94,6 +94,13 @@ pub fn translate(cds: &[u8], table: &CodonTable) -> Vec<u8> {
     protein
 }
 
+/// Strip trailing `X` amino acids produced by incomplete codons at the CDS end.
+pub fn strip_trailing_x(protein: &mut Vec<u8>) {
+    while protein.last() == Some(&b'X') {
+        protein.pop();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

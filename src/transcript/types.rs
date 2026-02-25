@@ -7,14 +7,14 @@ use crate::gff3::entry::CigarOp;
 use crate::strand::Strand;
 
 /// Type of a transcript region.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TranscriptRegionType {
     Exon,
     Intron,
 }
 
 /// A region within a transcript (exon or intron) mapping genomic to cDNA coordinates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TranscriptRegion {
     pub region_type: TranscriptRegionType,
     pub id: u16,
@@ -62,14 +62,33 @@ pub enum Source {
     Ensembl,
 }
 
+/// Designation flags for transcript clinical/reference significance.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct Designations {
+    pub is_mane_select: bool,
+    pub is_mane_plus_clinical: bool,
+    pub is_refseq_select: bool,
+    pub is_ensembl_canonical: bool,
+}
+
+impl std::ops::BitOrAssign for Designations {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.is_mane_select |= rhs.is_mane_select;
+        self.is_mane_plus_clinical |= rhs.is_mane_plus_clinical;
+        self.is_refseq_select |= rhs.is_refseq_select;
+        self.is_ensembl_canonical |= rhs.is_ensembl_canonical;
+    }
+}
+
 /// Gene record in the intermediate representation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Gene {
     pub chromosome_index: usize,
     pub symbol: String,
     pub ncbi_gene_id: Option<String>,
     pub ensembl_id: Option<String>,
-    pub hgnc_id: Option<i32>,
+    pub hgnc_id: Option<u32>,
     pub on_reverse_strand: bool,
 }
 
@@ -87,6 +106,5 @@ pub struct IntermediateTranscript {
     pub transcript_regions: Vec<TranscriptRegion>,
     pub coding_region: Option<CodingRegion>,
     pub cdna_seq: Vec<u8>,
-    pub is_canonical: bool,
-    pub is_mane_select: bool,
+    pub designations: Designations,
 }

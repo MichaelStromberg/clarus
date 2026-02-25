@@ -84,12 +84,14 @@ pub struct HgncConfig {
 pub struct EnsemblConfig {
     pub name: String,
     pub version: String,
+    #[allow(dead_code)] // Present in config JSON for documentation; not used by pipeline
     pub description: String,
     pub release_date: String,
     pub gff3: FileEntry,
     pub regulatory_gff: FileEntry,
     pub ncrna_fasta: FileEntry,
     pub cdna_fasta: FileEntry,
+    #[allow(dead_code)] // Deserialized from config JSON but not used by the current pipeline
     pub cds_fasta: FileEntry,
     pub peptide_fasta: FileEntry,
 }
@@ -101,7 +103,6 @@ impl EnsemblConfig {
             ("regulatory_gff", &self.regulatory_gff),
             ("ncrna_fasta", &self.ncrna_fasta),
             ("cdna_fasta", &self.cdna_fasta),
-            ("cds_fasta", &self.cds_fasta),
             ("peptide_fasta", &self.peptide_fasta),
         ]
         .into_iter()
@@ -113,6 +114,7 @@ impl EnsemblConfig {
 pub struct RefSeqCacheConfig {
     pub name: String,
     pub version: String,
+    #[allow(dead_code)] // Present in config JSON for documentation; not used by pipeline
     pub description: String,
     pub release_date: String,
     pub genbank: FileEntry,
@@ -295,8 +297,8 @@ mod tests {
         assert_eq!(config.genome_assembly, "GRCh38");
         assert!(config.ensembl.is_some());
         assert!(config.refseq.is_some());
-        // 6 ensembl + 4 refseq = 10
-        assert_eq!(config.file_entries().count(), 10);
+        // 5 ensembl + 4 refseq = 9 (cds_fasta excluded from file_entries)
+        assert_eq!(config.file_entries().count(), 9);
     }
 
     #[test]
@@ -373,7 +375,7 @@ mod tests {
         let f = write_config(&json);
         let config = CacheConfig::from_file(f.path()).unwrap();
         assert!(config.ensembl.is_some());
-        // All 6 ensembl entries have empty MD5 — validation should pass
-        assert_eq!(config.file_entries().count(), 6);
+        // All 5 ensembl entries have empty MD5 — validation should pass (cds_fasta excluded)
+        assert_eq!(config.file_entries().count(), 5);
     }
 }

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::biotype::{BioType, BioTypeCategory};
 use crate::error::Error;
 
-use super::entry::{GeneRecord, Gff3Entry, Gff3Result, TranscriptRecord};
+use super::entry::{Gff3Entry, Gff3Result, HierarchyData, make_id_key};
 
 /// Builds a gene-transcript-exon hierarchy from flat Ensembl GFF3 entries.
 pub struct EnsemblHierarchyBuilder {
@@ -132,13 +132,10 @@ impl EnsemblHierarchyBuilder {
                 })?;
                 let parent_stable_id = ensembl_stable_id(parent_id);
                 let parent_key = make_id_key(parent_stable_id, entry.chromosome_index);
-                let parent_index = match self.id_to_index.get(&parent_key) {
-                    Some(&idx) => idx,
-                    None => {
-                        // Parent transcript may have been filtered (artifact/unconfirmed).
-                        // Silently skip children of filtered transcripts.
-                        return Ok(());
-                    }
+                let Some(&parent_index) = self.id_to_index.get(&parent_key) else {
+                    // Parent transcript may have been filtered (artifact/unconfirmed).
+                    // Silently skip children of filtered transcripts.
+                    return Ok(());
                 };
 
                 match entry.biotype {
@@ -170,66 +167,18 @@ impl EnsemblHierarchyBuilder {
     }
 
     /// Consume the builder and produce the final GFF3 result.
-    pub fn build(mut self) -> Result<Gff3Result, Error> {
-        let mut genes = Vec::with_capacity(self.gene_indices.len());
-
-        // Take entries out by index using Option vec.
-        let mut entries: Vec<Option<Gff3Entry>> = self.entries.drain(..).map(Some).collect();
-
-        let take = |entries: &mut [Option<Gff3Entry>], i: usize| -> Result<Gff3Entry, Error> {
-            entries
-                .get_mut(i)
-                .and_then(|slot| slot.take())
-                .ok_or_else(|| Error::Parse(format!("missing GFF3 entry at index {i}")))
-        };
-
-        for &gene_idx in &self.gene_indices {
-            let gene_entry = take(&mut entries, gene_idx)?;
-            let transcript_indices = self
-                .transcript_children
-                .remove(&gene_idx)
-                .unwrap_or_default();
-
-            let mut transcripts = Vec::with_capacity(transcript_indices.len());
-            for tx_idx in transcript_indices {
-                let tx_entry = take(&mut entries, tx_idx)?;
-
-                let exon_indices = self.exon_children.remove(&tx_idx).unwrap_or_default();
-                let mut exons = Vec::with_capacity(exon_indices.len());
-                for i in exon_indices {
-                    exons.push(take(&mut entries, i)?);
-                }
-
-                let cds_indices = self.cds_children.remove(&tx_idx).unwrap_or_default();
-                let mut cds_entries = Vec::with_capacity(cds_indices.len());
-                for i in cds_indices {
-                    cds_entries.push(take(&mut entries, i)?);
-                }
-
-                transcripts.push(TranscriptRecord {
-                    entry: tx_entry,
-                    exons,
-                    cds_entries,
-                    matches: Vec::new(), // Ensembl never has cDNA_match records
-                });
-            }
-
-            genes.push(GeneRecord {
-                entry: gene_entry,
-                transcripts,
-            });
-        }
-
-        Ok(Gff3Result {
-            genes,
+    pub fn build(self) -> Result<Gff3Result, Error> {
+        HierarchyData {
+            entries: self.entries,
+            gene_indices: self.gene_indices,
+            transcript_children: self.transcript_children,
+            exon_children: self.exon_children,
+            cds_children: self.cds_children,
+            match_children: HashMap::new(),
             regulatory_regions: self.regulatory_regions,
-        })
+        }
+        .build()
     }
-}
-
-/// Construct an ID key: "stable_id|chromosome_index"
-fn make_id_key(stable_id: &str, chromosome_index: usize) -> String {
-    format!("{stable_id}|{chromosome_index}")
 }
 
 /// Extract the entity type prefix from an Ensembl ID.

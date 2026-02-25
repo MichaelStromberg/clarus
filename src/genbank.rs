@@ -24,6 +24,7 @@ pub fn parse_genbank_gz<R: Read>(reader: R) -> Result<HashMap<String, CdsRecord>
 }
 
 /// Parse GenBank from a buffered reader.
+#[allow(clippy::too_many_lines)]
 pub fn parse_genbank<R: BufRead>(reader: R) -> Result<HashMap<String, CdsRecord>, Error> {
     let mut results = HashMap::new();
     let mut lines = reader.lines();
@@ -112,7 +113,7 @@ pub fn parse_genbank<R: BufRead>(reader: R) -> Result<HashMap<String, CdsRecord>
                 loop {
                     match lines.next() {
                         Some(Ok(l)) if l.starts_with("//") => break,
-                        Some(Ok(_)) => continue,
+                        Some(Ok(_)) => {}
                         _ => break,
                     }
                 }

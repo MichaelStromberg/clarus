@@ -14,21 +14,23 @@ pub const REFERENCE_FILE_TYPE: u16 = 1;
 /// Current format version for reference sequence files.
 pub const REFERENCE_FORMAT_VERSION: u16 = 1;
 
-/// Writes the common header (signature + file type + format version) to a writer.
+/// Writes the common header (signature + file type + format version + file length) to a writer.
 pub fn write_common_header<W: Write>(
     writer: &mut W,
     file_type: u16,
     format_version: u16,
+    file_length: u64,
 ) -> Result<(), Error> {
     writer.write_u64(CLARUS_SIGNATURE)?;
     writer.write_u16(file_type)?;
     writer.write_u16(format_version)?;
+    writer.write_u64(file_length)?;
     Ok(())
 }
 
 /// Reads and validates the common header from a reader.
-/// Returns (file_type, format_version).
-pub fn read_common_header<R: Read>(reader: &mut R) -> Result<(u16, u16), Error> {
+/// Returns (file_type, format_version, file_length).
+pub fn read_common_header<R: Read>(reader: &mut R) -> Result<(u16, u16, u64), Error> {
     let signature = reader.read_u64()?;
     if signature != CLARUS_SIGNATURE {
         return Err(Error::Format(format!(
@@ -38,8 +40,9 @@ pub fn read_common_header<R: Read>(reader: &mut R) -> Result<(u16, u16), Error> 
 
     let file_type = reader.read_u16()?;
     let format_version = reader.read_u16()?;
+    let file_length = reader.read_u64()?;
 
-    Ok((file_type, format_version))
+    Ok((file_type, format_version, file_length))
 }
 
 #[cfg(test)]
@@ -56,12 +59,13 @@ mod tests {
     #[test]
     fn round_trip() {
         let mut buf = Vec::new();
-        write_common_header(&mut buf, REFERENCE_FILE_TYPE, REFERENCE_FORMAT_VERSION).unwrap();
+        write_common_header(&mut buf, REFERENCE_FILE_TYPE, REFERENCE_FORMAT_VERSION, 42).unwrap();
 
         let mut cursor = Cursor::new(buf);
-        let (file_type, format_version) = read_common_header(&mut cursor).unwrap();
+        let (file_type, format_version, file_length) = read_common_header(&mut cursor).unwrap();
         assert_eq!(file_type, REFERENCE_FILE_TYPE);
         assert_eq!(format_version, REFERENCE_FORMAT_VERSION);
+        assert_eq!(file_length, 42);
     }
 
     #[test]
@@ -70,6 +74,7 @@ mod tests {
         buf.extend_from_slice(&0u64.to_le_bytes());
         buf.extend_from_slice(&1u16.to_le_bytes());
         buf.extend_from_slice(&1u16.to_le_bytes());
+        buf.extend_from_slice(&0u64.to_le_bytes());
 
         let mut cursor = Cursor::new(buf);
         let result = read_common_header(&mut cursor);

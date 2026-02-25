@@ -36,6 +36,7 @@ struct Cli {
     out: PathBuf,
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     let start = Instant::now();
     let cli_args = Cli::parse();
@@ -64,7 +65,9 @@ fn main() -> Result<()> {
     // ── File Resolution ──────────────────────────────────
     cli::section("File Resolution");
 
-    let base_dir = PathBuf::from("/tmp/create_ref").join(format!("{assembly}.p{patch_level}"));
+    let base_dir = std::env::temp_dir()
+        .join("create_ref")
+        .join(format!("{assembly}.p{patch_level}"));
 
     let mut all_tasks: Vec<DownloadTask> = Vec::new();
     for (name, entry) in config.file_entries() {
@@ -122,7 +125,7 @@ fn main() -> Result<()> {
         &format!(
             "{} ({} chromosomes)",
             assembly_report_path.display(),
-            chromosomes.len()
+            cli::num(chromosomes.len())
         ),
     );
 
@@ -145,7 +148,7 @@ fn main() -> Result<()> {
         &format!(
             "{} ({} sequences)",
             fasta_path.display(),
-            fasta_records.len()
+            cli::num(fasta_records.len())
         ),
     );
 
@@ -154,14 +157,14 @@ fn main() -> Result<()> {
         let bands_file = File::open(bp).context("failed to open bands file")?;
         let bands_reader = BufReader::new(bands_file);
         let parsed = parse_ideogram(bands_reader)?;
-        let total_bands: usize = parsed.values().map(|v| v.len()).sum();
+        let total_bands: usize = parsed.values().map(Vec::len).sum();
         cli::kv(
             "Bands",
             &format!(
                 "{} ({} bands across {} chromosomes)",
                 bp.display(),
-                total_bands,
-                parsed.len()
+                cli::num(total_bands),
+                cli::num(parsed.len())
             ),
         );
         parsed
@@ -179,14 +182,14 @@ fn main() -> Result<()> {
                 by_ensembl.insert(chromosomes[idx].ensembl_name.clone(), regions);
             }
         }
-        let total: usize = by_ensembl.values().map(|v| v.len()).sum();
+        let total: usize = by_ensembl.values().map(Vec::len).sum();
         cli::kv(
             "miRNA",
             &format!(
                 "{} ({} regions across {} chromosomes)",
                 gp.display(),
-                total,
-                by_ensembl.len()
+                cli::num(total),
+                cli::num(by_ensembl.len())
             ),
         );
         by_ensembl
@@ -218,9 +221,9 @@ fn main() -> Result<()> {
         }
     }
 
-    cli::kv("Matched", &format!("{matched} sequences"));
+    cli::kv("Matched", &format!("{} sequences", cli::num(matched)));
     if skipped > 0 {
-        cli::kv("Skipped", &format!("{skipped} sequences"));
+        cli::kv("Skipped", &format!("{} sequences", cli::num(skipped)));
     }
 
     eprintln!();
@@ -231,6 +234,7 @@ fn main() -> Result<()> {
     if let Some(&chry_idx) = name_to_index.get("chrY")
         && let Some(chry_seq) = sequence_map.get(&chry_idx)
     {
+        #[allow(clippy::naive_bytecount)]
         let n_count = chry_seq.iter().filter(|&&b| b == b'N').count();
         if n_count > CHRY_N_MASKING_THRESHOLD {
             bail!(
@@ -241,8 +245,8 @@ fn main() -> Result<()> {
         }
         cli::success(&format!(
             "chrY N-masking ({} N bases, threshold: {})",
-            n_count.to_string().bold(),
-            CHRY_N_MASKING_THRESHOLD
+            cli::num(n_count).bold(),
+            cli::num(CHRY_N_MASKING_THRESHOLD)
         ));
     }
 
@@ -276,10 +280,10 @@ fn main() -> Result<()> {
     cli::kv("Output", &out_path.display().to_string());
     cli::kv("Assembly", &format!("{assembly}.p{patch_level}"));
     cli::kv("Reference ID", &format!("0x{reference_id:08X}"));
-    cli::kv("Chromosomes", &output_chroms.len().to_string());
+    cli::kv("Chromosomes", &cli::num(output_chroms.len()));
     if !mirna_map.is_empty() {
-        let total_mirna: usize = mirna_map.values().map(|v| v.len()).sum();
-        cli::kv("miRNA regions", &total_mirna.to_string());
+        let total_mirna: usize = mirna_map.values().map(Vec::len).sum();
+        cli::kv("miRNA regions", &cli::num(total_mirna));
     }
 
     let mut out_file = File::create(&out_path).context("failed to create output file")?;
@@ -362,10 +366,7 @@ fn verify_output(
             let chr_data = ref_reader.load_chromosome(&mut verify_reader, i)?;
 
             if has_bands {
-                let expected = bands_map
-                    .get(&chr.ensembl_name)
-                    .map(|b| b.len())
-                    .unwrap_or(0);
+                let expected = bands_map.get(&chr.ensembl_name).map_or(0, Vec::len);
                 if chr_data.bands.len() != expected {
                     bail!(
                         "verification failed: chromosome {} band count mismatch ({} vs {})",
@@ -378,10 +379,7 @@ fn verify_output(
             }
 
             if has_mirna {
-                let expected = mirna_map
-                    .get(&chr.ensembl_name)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                let expected = mirna_map.get(&chr.ensembl_name).map_or(0, Vec::len);
                 if chr_data.mirna.len() != expected {
                     bail!(
                         "verification failed: chromosome {} miRNA count mismatch ({} vs {})",
@@ -394,12 +392,15 @@ fn verify_output(
             }
         }
 
-        let mut parts = vec![format!("{} chromosomes", ref_reader.chromosomes.len())];
+        let mut parts = vec![format!(
+            "{} chromosomes",
+            cli::num(ref_reader.chromosomes.len())
+        )];
         if has_bands {
-            parts.push(format!("{total_bands} bands"));
+            parts.push(format!("{} bands", cli::num(total_bands)));
         }
         if has_mirna {
-            parts.push(format!("{total_mirna} miRNA regions"));
+            parts.push(format!("{} miRNA regions", cli::num(total_mirna)));
         }
         parts.push(format!("assembly={}", ref_reader.assembly));
         parts.push(format!("patch={}", ref_reader.patch_level));
@@ -407,7 +408,7 @@ fn verify_output(
     } else {
         cli::success(&format!(
             "{} chromosomes, assembly={}, patch={}",
-            ref_reader.chromosomes.len(),
+            cli::num(ref_reader.chromosomes.len()),
             ref_reader.assembly,
             ref_reader.patch_level
         ));

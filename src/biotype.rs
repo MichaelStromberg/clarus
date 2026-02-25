@@ -127,6 +127,7 @@ pub enum BioType {
 
 impl BioType {
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn category(self) -> BioTypeCategory {
         match self {
             // Gene types
@@ -386,6 +387,7 @@ impl TryFrom<u8> for BioType {
 impl std::str::FromStr for BioType {
     type Err = Error;
 
+    #[allow(clippy::too_many_lines)]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "aberrant_processed_transcript" => Ok(Self::AberrantProcessedTranscript),
@@ -500,6 +502,7 @@ impl std::str::FromStr for BioType {
 }
 
 impl fmt::Display for BioType {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             Self::AberrantProcessedTranscript => "aberrant_processed_transcript",

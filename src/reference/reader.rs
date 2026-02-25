@@ -56,7 +56,7 @@ impl ReferenceReader {
     /// Read and parse a reference file header.
     pub fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self, Error> {
         // Read common header
-        let (file_type, format_version) = read_common_header(reader)?;
+        let (file_type, format_version, _file_length) = read_common_header(reader)?;
 
         if file_type != REFERENCE_FILE_TYPE {
             return Err(Error::Format(format!(
@@ -69,9 +69,6 @@ impl ReferenceReader {
             )));
         }
 
-        // Read file length
-        let _file_length = reader.read_u64()?;
-
         // Read assembly, patch level, and reference ID
         let assembly_byte = reader.read_u8()?;
         let assembly = GenomeAssembly::try_from(assembly_byte)?;
@@ -79,7 +76,7 @@ impl ReferenceReader {
         let reference_id = reader.read_u32()?;
 
         // Read chromosome count
-        let chrom_count = reader.read_u32()?;
+        let chrom_count = reader.read_u16()?;
 
         // Read chromosome records
         let mut chromosomes = Vec::with_capacity(chrom_count as usize);
@@ -148,7 +145,7 @@ impl ReferenceReader {
         let sequence = zstd::decode_all(compressed.as_slice())?;
 
         // Read cytogenetic bands
-        let band_count = reader.read_u32()?;
+        let band_count = reader.read_u8()?;
         let mut bands = Vec::with_capacity(band_count as usize);
         for _ in 0..band_count {
             let begin = reader.read_u32()?;
@@ -158,7 +155,7 @@ impl ReferenceReader {
         }
 
         // Read miRNA regions
-        let mirna_count = reader.read_u32()?;
+        let mirna_count = reader.read_u8()?;
         let mut mirna = Vec::with_capacity(mirna_count as usize);
         for _ in 0..mirna_count {
             let begin = reader.read_u32()?;

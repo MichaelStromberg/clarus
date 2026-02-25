@@ -10,11 +10,11 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     /// A parse error occurred while reading input data.
-    #[error("{0}")]
+    #[error("parse error: {0}")]
     Parse(String),
 
     /// A validation constraint was violated.
-    #[error("{0}")]
+    #[error("validation error: {0}")]
     Validation(String),
 
     /// A file format error was detected.

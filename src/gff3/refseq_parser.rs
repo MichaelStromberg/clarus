@@ -3,19 +3,9 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::biotype::{BioType, BioTypeCategory};
 use crate::error::Error;
-use crate::strand::Strand;
 
-use super::entry::{CigarOp, CigarOpType, Gff3Attributes, Gff3Entry};
-
-/// Result of parsing a single GFF3 line.
-pub enum ParsedLine {
-    Entry(Box<Gff3Entry>),
-    Discarded,
-    Comment,
-    EndOfSection,
-}
+use super::entry::{CigarOp, CigarOpType, Gff3Attributes, ParsedLine, parse_gff3_line};
 
 /// Attribute keys that are recognized but not needed for transcript construction or evaluation.
 /// These are metadata fields from RefSeq/Ensembl GFF3 (alignment stats, cross-references,
@@ -114,78 +104,9 @@ static SKIPPED_KEYS: LazyLock<std::collections::HashSet<&'static str>> = LazyLoc
     .collect()
 });
 
-/// Parse a single GFF3 line into a structured entry.
+/// Parse a single RefSeq GFF3 line into a structured entry.
 pub fn parse_line(line: &str, name_to_index: &HashMap<String, usize>) -> Result<ParsedLine, Error> {
-    // Comments and directives
-    if line.starts_with('#') {
-        if line == "###" {
-            return Ok(ParsedLine::EndOfSection);
-        }
-        return Ok(ParsedLine::Comment);
-    }
-
-    let line = line.trim();
-    if line.is_empty() {
-        return Ok(ParsedLine::Comment);
-    }
-
-    // Split into 9 tab columns
-    let columns: Vec<&str> = line.split('\t').collect();
-    if columns.len() != 9 {
-        return Err(Error::Parse(format!(
-            "GFF3 line has {} columns, expected 9",
-            columns.len()
-        )));
-    }
-
-    // Column 1: chromosome
-    let chr_name = columns[0];
-    let chromosome_index = match name_to_index.get(chr_name) {
-        Some(&idx) => idx,
-        None => return Ok(ParsedLine::Discarded),
-    };
-
-    // Column 3: biotype (strict — unknown type is an error)
-    let biotype: BioType = columns[2].parse()?;
-
-    // Discard not-useful and unsupported
-    let category = biotype.category();
-    if matches!(
-        category,
-        BioTypeCategory::NotUseful | BioTypeCategory::Unsupported
-    ) {
-        return Ok(ParsedLine::Discarded);
-    }
-
-    // Column 4 & 5: start and end
-    let start: i32 = columns[3]
-        .parse()
-        .map_err(|e| Error::Parse(format!("invalid start '{}': {e}", columns[3])))?;
-    let end: i32 = columns[4]
-        .parse()
-        .map_err(|e| Error::Parse(format!("invalid end '{}': {e}", columns[4])))?;
-
-    // Column 7: strand
-    let strand = Strand::from_gff3(columns[6]);
-
-    // Column 9: attributes
-    let attributes = parse_attributes(columns[8])?;
-
-    // ID is required for non-discarded entries
-    if attributes.id.is_empty() {
-        return Err(Error::Parse(format!(
-            "GFF3 entry missing required ID attribute: {line}"
-        )));
-    }
-
-    Ok(ParsedLine::Entry(Box::new(Gff3Entry {
-        chromosome_index,
-        start,
-        end,
-        biotype,
-        strand,
-        attributes,
-    })))
+    parse_gff3_line(line, name_to_index, parse_attributes)
 }
 
 /// Parse GFF3 column 9 attributes.
@@ -212,9 +133,11 @@ fn parse_attributes(attrs_str: &str) -> Result<Gff3Attributes, Error> {
             "Dbxref" => parse_dbxref(value, &mut attrs)?,
             "tag" => {
                 if value == "RefSeq Select" {
-                    attrs.is_refseq_select = true;
+                    attrs.designations.is_refseq_select = true;
                 } else if value == "MANE Select" {
-                    attrs.is_mane_select = true;
+                    attrs.designations.is_mane_select = true;
+                } else if value == "MANE Plus Clinical" {
+                    attrs.designations.is_mane_plus_clinical = true;
                 }
             }
             "Target" => parse_target(value, &mut attrs)?,
@@ -248,7 +171,7 @@ fn parse_dbxref(value: &str, attrs: &mut Gff3Attributes) -> Result<(), Error> {
         match db_key {
             "GeneID" => attrs.gene_id = Some(db_value.to_string()),
             "HGNC:HGNC" => {
-                let id: i32 = db_value
+                let id: u32 = db_value
                     .parse()
                     .map_err(|e| Error::Parse(format!("invalid HGNC ID '{db_value}': {e}")))?;
                 attrs.hgnc_id = Some(id);
@@ -261,23 +184,27 @@ fn parse_dbxref(value: &str, attrs: &mut Gff3Attributes) -> Result<(), Error> {
 
 /// Parse Target attribute: "transcript_id start end [strand]"
 fn parse_target(value: &str, attrs: &mut Gff3Attributes) -> Result<(), Error> {
-    let parts: Vec<&str> = value.split(' ').collect();
-    if parts.len() < 3 {
-        return Err(Error::Parse(format!(
-            "Target attribute has {} components, expected at least 3: '{value}'",
-            parts.len()
-        )));
-    }
-    attrs.target_id = Some(parts[0].to_string());
+    let mut parts = value.split(' ');
+    let id = parts
+        .next()
+        .ok_or_else(|| Error::Parse(format!("Target attribute empty: '{value}'")))?;
+    let start_str = parts
+        .next()
+        .ok_or_else(|| Error::Parse(format!("Target attribute missing start: '{value}'")))?;
+    let end_str = parts
+        .next()
+        .ok_or_else(|| Error::Parse(format!("Target attribute missing end: '{value}'")))?;
+
+    attrs.target_id = Some(id.to_string());
     attrs.target_start = Some(
-        parts[1]
+        start_str
             .parse()
-            .map_err(|e| Error::Parse(format!("invalid Target start '{}': {e}", parts[1])))?,
+            .map_err(|e| Error::Parse(format!("invalid Target start '{start_str}': {e}")))?,
     );
     attrs.target_end = Some(
-        parts[2]
+        end_str
             .parse()
-            .map_err(|e| Error::Parse(format!("invalid Target end '{}': {e}", parts[2])))?,
+            .map_err(|e| Error::Parse(format!("invalid Target end '{end_str}': {e}")))?,
     );
     Ok(())
 }
@@ -323,8 +250,8 @@ fn parse_experiment(value: &str, attrs: &mut Gff3Attributes) -> Result<(), Error
     let bytes = value.as_bytes();
     let len = bytes.len();
     let mut i = 0;
-    let mut eco_id: Option<i32> = None;
-    let mut pubmed_ids: Vec<i32> = Vec::new();
+    let mut eco_id: Option<u32> = None;
+    let mut pubmed_ids: Vec<u32> = Vec::new();
 
     while i < len {
         // Find next '['
@@ -345,14 +272,14 @@ fn parse_experiment(value: &str, attrs: &mut Gff3Attributes) -> Result<(), Error
             let decoded = content.replace("%2C", ",");
             for part in decoded.split(", ") {
                 if part.len() > 5 {
-                    let id: i32 = part[5..]
+                    let id: u32 = part[5..]
                         .parse()
                         .map_err(|e| Error::Parse(format!("invalid PubMed ID in '{part}': {e}")))?;
                     pubmed_ids.push(id);
                 }
             }
         } else if content.starts_with("ECO") {
-            let id: i32 = content[4..]
+            let id: u32 = content[4..]
                 .parse()
                 .map_err(|e| Error::Parse(format!("invalid ECO ID in '{content}': {e}")))?;
             eco_id = Some(id);
@@ -382,6 +309,8 @@ fn parse_experiment(value: &str, attrs: &mut Gff3Attributes) -> Result<(), Error
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::biotype::BioType;
+    use crate::strand::Strand;
 
     fn test_name_map() -> HashMap<String, usize> {
         let mut m = HashMap::new();
@@ -538,8 +467,22 @@ mod tests {
         let result = parse_line(line, &test_name_map()).unwrap();
         match result {
             ParsedLine::Entry(e) => {
-                assert!(e.attributes.is_refseq_select);
-                assert!(!e.attributes.is_mane_select);
+                assert!(e.attributes.designations.is_refseq_select);
+                assert!(!e.attributes.designations.is_mane_select);
+            }
+            _ => panic!("expected Entry"),
+        }
+    }
+
+    #[test]
+    fn tag_mane_plus_clinical() {
+        let line = "NC_000001.11\tBestRefSeq\tmRNA\t100\t200\t.\t+\t.\tID=rna-NM_001.1;Parent=gene-X;Name=NM_001.1;tag=MANE Plus Clinical";
+        let result = parse_line(line, &test_name_map()).unwrap();
+        match result {
+            ParsedLine::Entry(e) => {
+                assert!(e.attributes.designations.is_mane_plus_clinical);
+                assert!(!e.attributes.designations.is_mane_select);
+                assert!(!e.attributes.designations.is_refseq_select);
             }
             _ => panic!("expected Entry"),
         }
@@ -551,7 +494,21 @@ mod tests {
         let result = parse_line(line, &test_name_map()).unwrap();
         match result {
             ParsedLine::Entry(e) => {
-                assert!(e.attributes.is_mane_select);
+                assert!(e.attributes.designations.is_mane_select);
+            }
+            _ => panic!("expected Entry"),
+        }
+    }
+
+    #[test]
+    fn multiple_designation_tags() {
+        let line = "NC_000001.11\tBestRefSeq\tmRNA\t100\t200\t.\t+\t.\tID=rna-NM_001.1;Parent=gene-X;Name=NM_001.1;tag=MANE Select;tag=RefSeq Select";
+        let result = parse_line(line, &test_name_map()).unwrap();
+        match result {
+            ParsedLine::Entry(e) => {
+                assert!(e.attributes.designations.is_mane_select);
+                assert!(e.attributes.designations.is_refseq_select);
+                assert!(!e.attributes.designations.is_mane_plus_clinical);
             }
             _ => panic!("expected Entry"),
         }

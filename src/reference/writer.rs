@@ -97,14 +97,18 @@ impl ReferenceWriter {
         chromosomes: &[Chromosome],
         offsets: &[u64],
     ) -> Result<(), Error> {
-        write_common_header(writer, REFERENCE_FILE_TYPE, REFERENCE_FORMAT_VERSION)?;
-        writer.write_u64(file_length)?;
+        write_common_header(
+            writer,
+            REFERENCE_FILE_TYPE,
+            REFERENCE_FORMAT_VERSION,
+            file_length,
+        )?;
         writer.write_u8(assembly.to_byte())?;
         writer.write_u8(patch_level)?;
         writer.write_u32(compute_reference_id(assembly, patch_level))?;
-        writer.write_u32(
-            u32::try_from(chromosomes.len())
-                .map_err(|_| Error::Validation("chromosome count exceeds u32::MAX".into()))?,
+        writer.write_u16(
+            u16::try_from(chromosomes.len())
+                .map_err(|_| Error::Validation("chromosome count exceeds u16::MAX".into()))?,
         )?;
 
         for (i, chr) in chromosomes.iter().enumerate() {
@@ -149,9 +153,9 @@ impl ReferenceWriter {
 
     fn write_bands<W: Write>(writer: &mut W, bands: Option<&[Band]>) -> Result<(), Error> {
         if let Some(band_list) = bands {
-            writer.write_u32(
-                u32::try_from(band_list.len())
-                    .map_err(|_| Error::Validation("band count exceeds u32::MAX".into()))?,
+            writer.write_u8(
+                u8::try_from(band_list.len())
+                    .map_err(|_| Error::Validation("band count exceeds u8::MAX".into()))?,
             )?;
             for band in band_list {
                 writer.write_u32(band.begin)?;
@@ -159,7 +163,7 @@ impl ReferenceWriter {
                 writer.write_prefixed_string(&band.name)?;
             }
         } else {
-            writer.write_u32(0)?;
+            writer.write_u8(0)?;
         }
         Ok(())
     }
@@ -169,16 +173,16 @@ impl ReferenceWriter {
         mirna: Option<&[MirnaRegion]>,
     ) -> Result<(), Error> {
         if let Some(list) = mirna {
-            writer.write_u32(
-                u32::try_from(list.len())
-                    .map_err(|_| Error::Validation("miRNA count exceeds u32::MAX".into()))?,
+            writer.write_u8(
+                u8::try_from(list.len())
+                    .map_err(|_| Error::Validation("miRNA count exceeds u8::MAX".into()))?,
             )?;
             for region in list {
                 writer.write_u32(region.begin)?;
                 writer.write_u32(region.end)?;
             }
         } else {
-            writer.write_u32(0)?;
+            writer.write_u8(0)?;
         }
         Ok(())
     }
@@ -197,8 +201,8 @@ impl ReferenceWriter {
     fn calculate_header_size(chromosomes: &[Chromosome]) -> usize {
         // Common header: signature(8) + file_type(2) + format_version(2) + file_length(8)
         let mut size: usize = 8 + 2 + 2 + 8;
-        // Reference header: assembly(1) + patch_level(1) + reference_id(4) + chrom_count(4)
-        size += 1 + 1 + 4 + 4;
+        // Reference header: assembly(1) + patch_level(1) + reference_id(4) + chrom_count(2)
+        size += 1 + 1 + 4 + 2;
         // Chromosome records
         for chr in chromosomes {
             size += prefixed_string_size(&chr.ucsc_name);
@@ -213,7 +217,7 @@ impl ReferenceWriter {
 
     /// Calculate the on-disk size of a band block (count + band records).
     fn calculate_band_block_size(bands: Option<&[Band]>) -> usize {
-        let mut size = 4; // band_count (u32)
+        let mut size = 1; // band_count (u8)
         if let Some(band_list) = bands {
             for band in band_list {
                 size += 4; // begin (u32)
@@ -226,7 +230,7 @@ impl ReferenceWriter {
 
     /// Calculate the on-disk size of a miRNA block (count + region records).
     fn calculate_mirna_block_size(regions: Option<&[MirnaRegion]>) -> usize {
-        let mut size = 4; // count (u32)
+        let mut size = 1; // count (u8)
         if let Some(list) = regions {
             size += list.len() * 8; // 4 (begin) + 4 (end) per region
         }
@@ -257,9 +261,9 @@ mod tests {
 
         let size = ReferenceWriter::calculate_header_size(&chroms);
         // common header: 20
-        // ref header: 10 (assembly(1) + patch_level(1) + reference_id(4) + chrom_count(4))
+        // ref header: 8 (assembly(1) + patch_level(1) + reference_id(4) + chrom_count(2))
         // chr record: (1+4) + (1+1) + (1+12) + (1+10) + 4 + 8 = 43
-        assert_eq!(size, 20 + 10 + 43);
+        assert_eq!(size, 20 + 8 + 43);
     }
 
     #[test]

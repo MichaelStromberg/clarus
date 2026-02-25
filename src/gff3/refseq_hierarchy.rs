@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::biotype::{BioType, BioTypeCategory};
 use crate::error::Error;
 
-use super::entry::{GeneRecord, Gff3Entry, Gff3Result, MatchRecord, TranscriptRecord};
+use super::entry::{Gff3Entry, Gff3Result, HierarchyData, make_id_key};
 
 /// Builds a gene-transcript-exon hierarchy from flat RefSeq GFF3 entries.
 pub struct RefSeqHierarchyBuilder {
@@ -161,75 +161,18 @@ impl RefSeqHierarchyBuilder {
     }
 
     /// Consume the builder and produce the final GFF3 result.
-    pub fn build(mut self) -> Result<Gff3Result, Error> {
-        let mut genes = Vec::with_capacity(self.gene_indices.len());
-
-        // Take entries out by index using Option vec.
-        let mut entries: Vec<Option<Gff3Entry>> = self.entries.drain(..).map(Some).collect();
-
-        let take = |entries: &mut [Option<Gff3Entry>], i: usize| -> Result<Gff3Entry, Error> {
-            entries
-                .get_mut(i)
-                .and_then(|slot| slot.take())
-                .ok_or_else(|| Error::Parse(format!("missing GFF3 entry at index {i}")))
-        };
-
-        for &gene_idx in &self.gene_indices {
-            let gene_entry = take(&mut entries, gene_idx)?;
-            let transcript_indices = self
-                .transcript_children
-                .remove(&gene_idx)
-                .unwrap_or_default();
-
-            let mut transcripts = Vec::with_capacity(transcript_indices.len());
-            for tx_idx in transcript_indices {
-                let tx_entry = take(&mut entries, tx_idx)?;
-
-                let exon_indices = self.exon_children.remove(&tx_idx).unwrap_or_default();
-                let mut exons = Vec::with_capacity(exon_indices.len());
-                for i in exon_indices {
-                    exons.push(take(&mut entries, i)?);
-                }
-
-                let cds_indices = self.cds_children.remove(&tx_idx).unwrap_or_default();
-                let mut cds_entries = Vec::with_capacity(cds_indices.len());
-                for i in cds_indices {
-                    cds_entries.push(take(&mut entries, i)?);
-                }
-
-                let match_indices = self.match_children.remove(&tx_idx).unwrap_or_default();
-                let mut matches = Vec::with_capacity(match_indices.len());
-                for i in match_indices {
-                    matches.push(MatchRecord {
-                        entry: take(&mut entries, i)?,
-                        exons: Vec::new(), // Populated during construction
-                    });
-                }
-
-                transcripts.push(TranscriptRecord {
-                    entry: tx_entry,
-                    exons,
-                    cds_entries,
-                    matches,
-                });
-            }
-
-            genes.push(GeneRecord {
-                entry: gene_entry,
-                transcripts,
-            });
-        }
-
-        Ok(Gff3Result {
-            genes,
+    pub fn build(self) -> Result<Gff3Result, Error> {
+        HierarchyData {
+            entries: self.entries,
+            gene_indices: self.gene_indices,
+            transcript_children: self.transcript_children,
+            exon_children: self.exon_children,
+            cds_children: self.cds_children,
+            match_children: self.match_children,
             regulatory_regions: self.regulatory_regions,
-        })
+        }
+        .build()
     }
-}
-
-/// Construct an ID key: "id|chromosome_index"
-fn make_id_key(id: &str, chromosome_index: usize) -> String {
-    format!("{id}|{chromosome_index}")
 }
 
 /// Construct an exon key: "chr_index|transcript_id|start"

@@ -16,10 +16,10 @@ pub fn build_transcript_regions(
     matches: &[MatchRecord],
     strand: Strand,
 ) -> Result<Vec<TranscriptRegion>, Error> {
-    let mut regions = if !matches.is_empty() {
-        build_cigar_aware(matches, strand)?
-    } else {
+    let mut regions = if matches.is_empty() {
         build_exon_regions(exons, strand)
+    } else {
+        build_cigar_aware(matches, strand)?
     };
 
     // Insert introns between consecutive exons
@@ -69,23 +69,13 @@ fn build_exon_regions(exons: &[Gff3Entry], strand: Strand) -> Vec<TranscriptRegi
     regions
 }
 
-/// Count the number of M (match) blocks in a MatchRecord's CIGAR.
-fn count_m_blocks(m: &MatchRecord) -> u16 {
-    match &m.entry.attributes.cigar_ops {
-        Some(ops) => ops
-            .iter()
-            .filter(|o| o.op_type == CigarOpType::Match)
-            .count() as u16,
-        None => 1,
-    }
-}
-
-/// CIGAR-aware exon normalization from cDNA_match records.
+/// CIGAR-aware exon construction from cDNA_match records.
 ///
-/// When CIGAR ops contain D (deletion) or I (insertion) ops, the match is split
-/// into separate sub-regions at each D/I boundary. Each M (match) block becomes
-/// its own exon region with a 1:1 genomic-to-cDNA mapping, allowing the linear
-/// formula in `map_genomic_to_cdna` to work correctly.
+/// Each MatchRecord becomes a single exon region. Genomic coordinates come from
+/// the entry's start/end, cDNA coordinates from Target start/end, and CIGAR ops
+/// are preserved on the region for use by `cigar_walk` during coordinate mapping.
+/// D/I gaps within a match are NOT split into separate regions — they are
+/// alignment artifacts, not real splice sites.
 fn build_cigar_aware(
     matches: &[MatchRecord],
     strand: Strand,
@@ -93,89 +83,42 @@ fn build_cigar_aware(
     let mut sorted_matches: Vec<&MatchRecord> = matches.iter().collect();
     sorted_matches.sort_by_key(|m| m.entry.start);
 
-    let mut regions = Vec::new();
-    let total_blocks: u16 = if strand.is_reverse() {
-        sorted_matches.iter().map(|m| count_m_blocks(m)).sum()
-    } else {
-        0
-    };
-    let mut id: u16 = if strand.is_reverse() { total_blocks } else { 1 };
+    let mut regions = Vec::with_capacity(sorted_matches.len());
 
     for m in &sorted_matches {
         let target_start = m
             .entry
             .attributes
             .target_start
-            .ok_or_else(|| Error::Parse("cDNA_match missing TargetStart".to_string()))?;
+            .ok_or_else(|| Error::Parse("cDNA_match missing TargetStart".into()))?;
         let target_end = m
             .entry
             .attributes
             .target_end
-            .ok_or_else(|| Error::Parse("cDNA_match missing TargetEnd".to_string()))?;
+            .ok_or_else(|| Error::Parse("cDNA_match missing TargetEnd".into()))?;
 
-        if let Some(ref cigar_ops) = m.entry.attributes.cigar_ops {
-            let mut genomic_pos = m.entry.start;
-            let mut cdna_pos = if strand.is_reverse() {
-                target_end
-            } else {
-                target_start
-            };
+        regions.push(TranscriptRegion {
+            region_type: TranscriptRegionType::Exon,
+            id: 0, // assigned below
+            genomic_start: m.entry.start,
+            genomic_end: m.entry.end,
+            cdna_start: target_start,
+            cdna_end: target_end,
+            cigar_ops: m.entry.attributes.cigar_ops.clone(),
+        });
+    }
 
-            for op in cigar_ops {
-                let len = op.length as i32;
-                match op.op_type {
-                    CigarOpType::Match => {
-                        let (cs, ce) = if strand.is_reverse() {
-                            (cdna_pos - len + 1, cdna_pos)
-                        } else {
-                            (cdna_pos, cdna_pos + len - 1)
-                        };
-                        regions.push(TranscriptRegion {
-                            region_type: TranscriptRegionType::Exon,
-                            id,
-                            genomic_start: genomic_pos,
-                            genomic_end: genomic_pos + len - 1,
-                            cdna_start: cs,
-                            cdna_end: ce,
-                            cigar_ops: None,
-                        });
-                        genomic_pos += len;
-                        if strand.is_reverse() {
-                            cdna_pos -= len;
-                            id = id.saturating_sub(1);
-                        } else {
-                            cdna_pos += len;
-                            id += 1;
-                        }
-                    }
-                    CigarOpType::Deletion => {
-                        genomic_pos += len;
-                    }
-                    CigarOpType::Insertion => {
-                        if strand.is_reverse() {
-                            cdna_pos -= len;
-                        } else {
-                            cdna_pos += len;
-                        }
-                    }
-                }
-            }
-        } else {
-            // No CIGAR — single region (preserves existing behavior)
-            regions.push(TranscriptRegion {
-                region_type: TranscriptRegionType::Exon,
-                id,
-                genomic_start: m.entry.start,
-                genomic_end: m.entry.end,
-                cdna_start: target_start,
-                cdna_end: target_end,
-                cigar_ops: None,
-            });
-            if strand.is_reverse() {
-                id = id.saturating_sub(1);
-            } else {
-                id += 1;
-            }
+    // Assign exon IDs sorted by genomic position.
+    // Exon counts per transcript are well under u16::MAX for all known genomes.
+    regions.sort_by_key(|r| r.genomic_start);
+    let count = regions.len() as u16;
+    if strand.is_reverse() {
+        for (i, region) in regions.iter_mut().enumerate() {
+            region.id = count - (i as u16);
+        }
+    } else {
+        for (i, region) in regions.iter_mut().enumerate() {
+            region.id = (i as u16) + 1;
         }
     }
 
@@ -235,12 +178,12 @@ pub fn detect_coding_region(
         .iter()
         .map(|c| c.start)
         .min()
-        .ok_or_else(|| Error::Parse("CDS entries empty after is_empty check".to_string()))?;
+        .expect("invariant: slice non-empty after is_empty guard");
     let genomic_end = cds_entries
         .iter()
         .map(|c| c.end)
         .max()
-        .ok_or_else(|| Error::Parse("CDS entries empty after is_empty check".to_string()))?;
+        .expect("invariant: slice non-empty after is_empty guard");
 
     // Map to cDNA coordinates (strand-aware)
     let (map_start, map_end) = if strand.is_reverse() {
@@ -273,7 +216,79 @@ pub fn detect_coding_region(
     })
 }
 
+/// Walk CIGAR operations to map a genomic position to cDNA within a CIGAR-bearing region.
+///
+/// Implements spec `05_coordinate_mapping.md` Section 3.2.
+fn cigar_walk(
+    variant_pos: i32,
+    region: &TranscriptRegion,
+    ops: &[crate::gff3::entry::CigarOp],
+    strand: Strand,
+) -> i32 {
+    // Step 1: Initialize genomic_pos just before exon start
+    let mut genomic_pos = if strand.is_reverse() {
+        region.genomic_end + 1
+    } else {
+        region.genomic_start - 1
+    };
+
+    // Step 2: Initialize cdna_pos
+    let mut cdna_pos = region.cdna_start - 1;
+
+    // Step 3: Walk each CIGAR op
+    for op in ops {
+        // CIGAR op lengths are small (genomic alignment segments within exons);
+        // safe to convert to i32 for signed coordinate arithmetic on reverse strand.
+        debug_assert!(
+            i32::try_from(op.length).is_ok(),
+            "CIGAR op length exceeds i32::MAX"
+        );
+        let len = op.length as i32;
+        let (delta_genome, delta_cdna) = match op.op_type {
+            CigarOpType::Match => {
+                let dg = if strand.is_reverse() { -len } else { len };
+                (dg, len)
+            }
+            CigarOpType::Insertion => (0, len),
+            CigarOpType::Deletion => {
+                let dg = if strand.is_reverse() { -len } else { len };
+                (dg, 0)
+            }
+        };
+
+        // Step 4: Next genomic position after this op
+        let next_genomic_pos = genomic_pos + delta_genome;
+
+        // Step 5: Check whether target position is reached within this op
+        let reached = if strand.is_reverse() {
+            next_genomic_pos <= variant_pos
+        } else {
+            next_genomic_pos >= variant_pos
+        };
+
+        if reached {
+            // Step 6: Compute remaining distance and constrained deltas
+            let remaining = (variant_pos - genomic_pos).abs();
+            let constrained_cdna = match op.op_type {
+                CigarOpType::Match | CigarOpType::Insertion => remaining,
+                CigarOpType::Deletion => 0,
+            };
+            cdna_pos += constrained_cdna;
+            return cdna_pos;
+        }
+
+        // Step 7: Accumulate full deltas
+        genomic_pos += delta_genome;
+        cdna_pos += delta_cdna;
+    }
+
+    cdna_pos
+}
+
 /// Map a genomic position to a cDNA position through transcript regions.
+///
+/// Dispatches to `cigar_walk` when the exon has CIGAR ops, otherwise uses
+/// the linear offset formula.
 fn map_genomic_to_cdna(
     genomic_pos: i32,
     regions: &[TranscriptRegion],
@@ -284,6 +299,9 @@ fn map_genomic_to_cdna(
             continue;
         }
         if genomic_pos >= region.genomic_start && genomic_pos <= region.genomic_end {
+            if let Some(ops) = &region.cigar_ops {
+                return Ok(cigar_walk(genomic_pos, region, ops, strand));
+            }
             let cdna_pos = if strand.is_reverse() {
                 region.cdna_start + (region.genomic_end - genomic_pos)
             } else {
@@ -300,7 +318,7 @@ fn map_genomic_to_cdna(
 #[cfg(test)]
 mod tests {
     use crate::biotype::BioType;
-    use crate::gff3::entry::{CigarOp, Gff3Attributes};
+    use crate::gff3::entry::{CigarOp, CigarOpType, Gff3Attributes};
 
     use super::*;
 
@@ -513,9 +531,98 @@ mod tests {
     }
 
     #[test]
-    fn cigar_aware_splits_at_deletions() {
+    fn cigar_aware_single_region_with_ops() {
         // Models NM_001396027.1: Gap=M241 D1 M35 D1 M420
         // Genomic span = 698 bp, cDNA span = 696 bp
+        // Single exon region with CIGAR ops preserved for cigar_walk mapping.
+        let cigar = vec![
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 241,
+            },
+            CigarOp {
+                op_type: CigarOpType::Deletion,
+                length: 1,
+            },
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 35,
+            },
+            CigarOp {
+                op_type: CigarOpType::Deletion,
+                length: 1,
+            },
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 420,
+            },
+        ];
+        let cigar_clone = cigar.clone();
+        let matches = vec![make_match(1000, 1697, "NM_TEST.1", 1, 696, Some(cigar))];
+        let regions = build_transcript_regions(&[], &matches, Strand::Forward).unwrap();
+
+        // Single exon region (no fake introns from D gaps)
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].region_type, TranscriptRegionType::Exon);
+        assert_eq!(regions[0].genomic_start, 1000);
+        assert_eq!(regions[0].genomic_end, 1697);
+        assert_eq!(regions[0].cdna_start, 1);
+        assert_eq!(regions[0].cdna_end, 696);
+        assert_eq!(regions[0].id, 1);
+        assert_eq!(regions[0].cigar_ops, Some(cigar_clone));
+    }
+
+    #[test]
+    fn cigar_aware_no_gap_single_region() {
+        // No CIGAR ops — single region (existing behavior)
+        let matches = vec![make_match(1000, 1200, "NM_TEST.1", 1, 201, None)];
+        let regions = build_transcript_regions(&[], &matches, Strand::Forward).unwrap();
+
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].genomic_start, 1000);
+        assert_eq!(regions[0].genomic_end, 1200);
+        assert_eq!(regions[0].cdna_start, 1);
+        assert_eq!(regions[0].cdna_end, 201);
+    }
+
+    #[test]
+    fn cigar_aware_single_region_with_insertion() {
+        // Gap=M100 I2 M100 — insertion of 2 bases in cDNA (not in genome)
+        // Single exon region with CIGAR ops; cigar_walk handles the I gap.
+        let cigar = vec![
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 100,
+            },
+            CigarOp {
+                op_type: CigarOpType::Insertion,
+                length: 2,
+            },
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 100,
+            },
+        ];
+        let cigar_clone = cigar.clone();
+        let matches = vec![make_match(1000, 1199, "NM_TEST.1", 1, 202, Some(cigar))];
+        let regions = build_transcript_regions(&[], &matches, Strand::Forward).unwrap();
+
+        // Single exon region (I ops don't split into sub-regions)
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].region_type, TranscriptRegionType::Exon);
+        assert_eq!(regions[0].genomic_start, 1000);
+        assert_eq!(regions[0].genomic_end, 1199);
+        assert_eq!(regions[0].cdna_start, 1);
+        assert_eq!(regions[0].cdna_end, 202);
+        assert_eq!(regions[0].id, 1);
+        assert_eq!(regions[0].cigar_ops, Some(cigar_clone));
+    }
+
+    #[test]
+    fn cds_mapping_with_cigar_deletions() {
+        // Build regions from CIGAR-aware match with D ops (NM_001396027.1 model).
+        // CDS spans the full region. cigar_walk produces cdna_end=696 (not 698)
+        // because D ops are walked, not computed by linear formula.
         let cigar = vec![
             CigarOp {
                 op_type: CigarOpType::Match,
@@ -541,74 +648,150 @@ mod tests {
         let matches = vec![make_match(1000, 1697, "NM_TEST.1", 1, 696, Some(cigar))];
         let regions = build_transcript_regions(&[], &matches, Strand::Forward).unwrap();
 
-        // 3 exon sub-regions + 2 introns = 5 regions
-        assert_eq!(regions.len(), 5);
-
-        // Exon 1: M241
-        assert_eq!(regions[0].region_type, TranscriptRegionType::Exon);
-        assert_eq!(regions[0].genomic_start, 1000);
-        assert_eq!(regions[0].genomic_end, 1240);
-        assert_eq!(regions[0].cdna_start, 1);
-        assert_eq!(regions[0].cdna_end, 241);
-        assert_eq!(regions[0].id, 1);
-
-        // Intron 1 (D1 gap)
-        assert_eq!(regions[1].region_type, TranscriptRegionType::Intron);
-        assert_eq!(regions[1].genomic_start, 1241);
-        assert_eq!(regions[1].genomic_end, 1241);
-
-        // Exon 2: M35
-        assert_eq!(regions[2].region_type, TranscriptRegionType::Exon);
-        assert_eq!(regions[2].genomic_start, 1242);
-        assert_eq!(regions[2].genomic_end, 1276);
-        assert_eq!(regions[2].cdna_start, 242);
-        assert_eq!(regions[2].cdna_end, 276);
-        assert_eq!(regions[2].id, 2);
-
-        // Intron 2 (D1 gap)
-        assert_eq!(regions[3].region_type, TranscriptRegionType::Intron);
-        assert_eq!(regions[3].genomic_start, 1277);
-        assert_eq!(regions[3].genomic_end, 1277);
-
-        // Exon 3: M420
-        assert_eq!(regions[4].region_type, TranscriptRegionType::Exon);
-        assert_eq!(regions[4].genomic_start, 1278);
-        assert_eq!(regions[4].genomic_end, 1697);
-        assert_eq!(regions[4].cdna_start, 277);
-        assert_eq!(regions[4].cdna_end, 696);
-        assert_eq!(regions[4].id, 3);
-
-        // CDS spanning the full range maps correctly
+        // CDS spanning the full region
         let cds = vec![make_exon(1000, 1697)];
         let coding = detect_coding_region(
             &cds,
             &regions,
             Strand::Forward,
             "NP_TEST.1",
-            b"M".to_vec(),
+            b"MACK*".to_vec(),
             None,
         )
         .unwrap();
+
         assert_eq!(coding.cdna_start, 1);
         assert_eq!(coding.cdna_end, 696); // NOT 698
     }
 
     #[test]
-    fn cigar_aware_no_gap_single_region() {
-        // No CIGAR ops — single region (existing behavior)
-        let matches = vec![make_match(1000, 1200, "NM_TEST.1", 1, 201, None)];
-        let regions = build_transcript_regions(&[], &matches, Strand::Forward).unwrap();
+    fn cigar_aware_reverse_strand_cds_mapping() {
+        // Reverse-strand cDNA_match with D ops.
+        // CIGAR: M241 D1 M35 D1 M420 (same as forward test)
+        // Single region with CIGAR ops; cigar_walk handles reverse strand mapping.
+        let cigar = vec![
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 241,
+            },
+            CigarOp {
+                op_type: CigarOpType::Deletion,
+                length: 1,
+            },
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 35,
+            },
+            CigarOp {
+                op_type: CigarOpType::Deletion,
+                length: 1,
+            },
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 420,
+            },
+        ];
+        let matches = vec![make_match(1000, 1697, "NM_TEST.1", 1, 696, Some(cigar))];
+        let regions = build_transcript_regions(&[], &matches, Strand::Reverse).unwrap();
 
+        // Single exon region
         assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].region_type, TranscriptRegionType::Exon);
         assert_eq!(regions[0].genomic_start, 1000);
-        assert_eq!(regions[0].genomic_end, 1200);
+        assert_eq!(regions[0].genomic_end, 1697);
         assert_eq!(regions[0].cdna_start, 1);
-        assert_eq!(regions[0].cdna_end, 201);
+        assert_eq!(regions[0].cdna_end, 696);
+        assert_eq!(regions[0].id, 1);
+
+        // CDS spanning full range maps correctly via cigar_walk
+        let cds = vec![make_exon(1000, 1697)];
+        let coding = detect_coding_region(
+            &cds,
+            &regions,
+            Strand::Reverse,
+            "NP_TEST.1",
+            b"M".to_vec(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(coding.cdna_start, 1);
+        assert_eq!(coding.cdna_end, 696);
     }
 
     #[test]
-    fn cigar_aware_insertion_op() {
-        // Gap=M100 I2 M100 — insertion of 2 bases in cDNA (not in genome)
+    fn cigar_walk_maps_through_deletions() {
+        // Test map_genomic_to_cdna at specific positions through M241/D1/M35/D1/M420.
+        let cigar = vec![
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 241,
+            },
+            CigarOp {
+                op_type: CigarOpType::Deletion,
+                length: 1,
+            },
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 35,
+            },
+            CigarOp {
+                op_type: CigarOpType::Deletion,
+                length: 1,
+            },
+            CigarOp {
+                op_type: CigarOpType::Match,
+                length: 420,
+            },
+        ];
+        let matches = vec![make_match(1000, 1697, "NM_TEST.1", 1, 696, Some(cigar))];
+        let regions = build_transcript_regions(&[], &matches, Strand::Forward).unwrap();
+
+        // First base of M241
+        assert_eq!(
+            map_genomic_to_cdna(1000, &regions, Strand::Forward).unwrap(),
+            1
+        );
+        // Last base of M241
+        assert_eq!(
+            map_genomic_to_cdna(1240, &regions, Strand::Forward).unwrap(),
+            241
+        );
+        // D1 gap — maps to last cDNA before deletion
+        assert_eq!(
+            map_genomic_to_cdna(1241, &regions, Strand::Forward).unwrap(),
+            241
+        );
+        // First base of M35
+        assert_eq!(
+            map_genomic_to_cdna(1242, &regions, Strand::Forward).unwrap(),
+            242
+        );
+        // Last base of M35
+        assert_eq!(
+            map_genomic_to_cdna(1276, &regions, Strand::Forward).unwrap(),
+            276
+        );
+        // D1 gap — maps to last cDNA before deletion
+        assert_eq!(
+            map_genomic_to_cdna(1277, &regions, Strand::Forward).unwrap(),
+            276
+        );
+        // First base of M420
+        assert_eq!(
+            map_genomic_to_cdna(1278, &regions, Strand::Forward).unwrap(),
+            277
+        );
+        // Last base of M420
+        assert_eq!(
+            map_genomic_to_cdna(1697, &regions, Strand::Forward).unwrap(),
+            696
+        );
+    }
+
+    #[test]
+    fn cigar_walk_maps_through_insertion() {
+        // Test map_genomic_to_cdna through M100/I2/M100.
+        // cDNA positions 101-102 are insertion bases with no genomic counterpart.
         let cigar = vec![
             CigarOp {
                 op_type: CigarOpType::Match,
@@ -626,19 +809,25 @@ mod tests {
         let matches = vec![make_match(1000, 1199, "NM_TEST.1", 1, 202, Some(cigar))];
         let regions = build_transcript_regions(&[], &matches, Strand::Forward).unwrap();
 
-        // 2 sub-regions, NO intron (genomically adjacent, gap=0)
-        assert_eq!(regions.len(), 2);
-
-        // Sub-region 1: M100
-        assert_eq!(regions[0].genomic_start, 1000);
-        assert_eq!(regions[0].genomic_end, 1099);
-        assert_eq!(regions[0].cdna_start, 1);
-        assert_eq!(regions[0].cdna_end, 100);
-
-        // Sub-region 2: M100 (cDNA jumps by 2 for the I op)
-        assert_eq!(regions[1].genomic_start, 1100);
-        assert_eq!(regions[1].genomic_end, 1199);
-        assert_eq!(regions[1].cdna_start, 103);
-        assert_eq!(regions[1].cdna_end, 202);
+        // First base
+        assert_eq!(
+            map_genomic_to_cdna(1000, &regions, Strand::Forward).unwrap(),
+            1
+        );
+        // Last base of first M block
+        assert_eq!(
+            map_genomic_to_cdna(1099, &regions, Strand::Forward).unwrap(),
+            100
+        );
+        // First base after insertion — cDNA skips I2 bases (101, 102)
+        assert_eq!(
+            map_genomic_to_cdna(1100, &regions, Strand::Forward).unwrap(),
+            103
+        );
+        // Last base
+        assert_eq!(
+            map_genomic_to_cdna(1199, &regions, Strand::Forward).unwrap(),
+            202
+        );
     }
 }

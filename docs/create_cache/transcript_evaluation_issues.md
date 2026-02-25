@@ -207,6 +207,10 @@ For `Gap=M241 D1 M35 D1 M420`, the single region is split into 3 sub-regions wit
 - Pipeline no longer crashes on NM_001396027.1
 - NM_001396027.1 evaluates successfully (CDS 1..696 = 231 aa + stop matches GenBank protein)
 
+### Phase 4 Superseded: Single-Region + CIGAR Walk
+
+The Phase 4 split approach (splitting each M block into a separate sub-region) was superseded by a cleaner design: each `cDNA_match` produces a **single** exon region with CIGAR ops preserved on it. The `map_genomic_to_cdna` function dispatches to a CIGAR walk algorithm (spec `05_coordinate_mapping.md` Section 3.2) when a region has CIGAR ops, instead of using the linear offset formula. This avoids inflating exon/intron counts with alignment artifacts, preserves CIGAR context for runtime RNA edit detection, and prevents D-gap "introns" from confusing splice site annotation.
+
 ---
 
 ## Phase 5: Frame Correction Preprocessing and Offset Fallback

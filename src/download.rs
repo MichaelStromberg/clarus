@@ -133,7 +133,7 @@ pub fn download_parallel(tasks: &[DownloadTask]) -> Vec<DownloadResult> {
             Err(payload) => {
                 let msg = payload
                     .downcast_ref::<&str>()
-                    .map(|s| s.to_string())
+                    .map(ToString::to_string)
                     .or_else(|| payload.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic".to_string());
                 DownloadResult {
@@ -150,9 +150,8 @@ pub fn download_parallel(tasks: &[DownloadTask]) -> Vec<DownloadResult> {
 pub fn verify_checksums(tasks: &[DownloadTask]) -> Vec<ChecksumFailure> {
     tasks
         .iter()
-        .filter(|task| task.expected_md5.is_some())
         .filter_map(|task| {
-            let expected = task.expected_md5.as_ref().unwrap();
+            let expected = task.expected_md5.as_ref()?;
             let actual = match compute_md5(&task.dest) {
                 Ok(md5) => md5,
                 Err(e) => {
@@ -163,15 +162,15 @@ pub fn verify_checksums(tasks: &[DownloadTask]) -> Vec<ChecksumFailure> {
                     });
                 }
             };
-            if actual != *expected {
+            if actual == *expected {
+                None
+            } else {
                 Some(ChecksumFailure::Mismatch {
                     name: task.name.clone(),
                     path: task.dest.clone(),
                     expected: expected.clone(),
                     actual,
                 })
-            } else {
-                None
             }
         })
         .collect()

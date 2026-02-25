@@ -1,7 +1,7 @@
 //! Selenoprotein gene identification by HGNC ID.
 
 /// The 16 HGNC IDs for known selenoprotein genes.
-static SELENOPROTEIN_HGNC_IDS: [i32; 16] = [
+static SELENOPROTEIN_HGNC_IDS: [u32; 16] = [
     2884,  // DIO1
     4555,  // GPX1
     4556,  // GPX2
@@ -21,7 +21,7 @@ static SELENOPROTEIN_HGNC_IDS: [i32; 16] = [
 ];
 
 /// Returns true if the given HGNC ID identifies a selenoprotein gene.
-pub fn is_selenoprotein(hgnc_id: Option<i32>) -> bool {
+pub fn is_selenoprotein(hgnc_id: Option<u32>) -> bool {
     match hgnc_id {
         Some(id) => SELENOPROTEIN_HGNC_IDS.contains(&id),
         None => false,

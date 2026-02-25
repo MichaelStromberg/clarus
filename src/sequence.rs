@@ -36,7 +36,7 @@ impl RnaSequences {
     /// Get a cDNA sequence by transcript ID.
     #[must_use]
     pub fn get(&self, transcript_id: &str) -> Option<&[u8]> {
-        self.sequences.get(transcript_id).map(|v| v.as_slice())
+        self.sequences.get(transcript_id).map(Vec::as_slice)
     }
 
     /// Remove and return a cDNA sequence by transcript ID, transferring ownership.
@@ -44,9 +44,9 @@ impl RnaSequences {
         self.sequences.remove(transcript_id)
     }
 
-    /// Get a mutable reference to the inner map for mitochondrial sequence insertion.
-    pub fn inner_mut(&mut self) -> &mut HashMap<String, Vec<u8>> {
-        &mut self.sequences
+    /// Insert a cDNA sequence (e.g., for mitochondrial sequence injection).
+    pub fn insert(&mut self, transcript_id: String, seq: Vec<u8>) {
+        self.sequences.insert(transcript_id, seq);
     }
 
     #[must_use]
@@ -142,7 +142,7 @@ impl ProteinSequences {
     /// Get a protein sequence by protein ID.
     #[must_use]
     pub fn get_by_protein_id(&self, protein_id: &str) -> Option<&[u8]> {
-        self.sequences.get(protein_id).map(|v| v.as_slice())
+        self.sequences.get(protein_id).map(Vec::as_slice)
     }
 
     /// Get the protein ID for a transcript ID.
@@ -150,7 +150,7 @@ impl ProteinSequences {
     pub fn protein_id_for_transcript(&self, transcript_id: &str) -> Option<&str> {
         self.transcript_to_protein
             .get(transcript_id)
-            .map(|s| s.as_str())
+            .map(String::as_str)
     }
 
     #[must_use]
@@ -162,6 +162,28 @@ impl ProteinSequences {
     pub fn is_empty(&self) -> bool {
         self.sequences.is_empty()
     }
+}
+
+/// Compute the reverse complement of a DNA sequence.
+///
+/// Complements each base (A↔T, C↔G, N→N) then reverses the sequence.
+/// Used for extracting mitochondrial cDNA from the reference genome.
+#[must_use]
+pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
+    seq.iter()
+        .rev()
+        .map(|&b| match b {
+            b'A' => b'T',
+            b'T' => b'A',
+            b'C' => b'G',
+            b'G' => b'C',
+            b'a' => b't',
+            b't' => b'a',
+            b'c' => b'g',
+            b'g' => b'c',
+            _ => b,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -229,5 +251,14 @@ mod tests {
         let fasta = b">NP_001.1 first\nMACK\n>NP_001.1 second\nMMMM\n";
         let gz = make_gz(fasta);
         assert!(ProteinSequences::from_gz(std::io::Cursor::new(gz)).is_err());
+    }
+
+    #[test]
+    fn reverse_complement_basic() {
+        assert_eq!(super::reverse_complement(b"ACGT"), b"ACGT");
+        assert_eq!(super::reverse_complement(b"AAAA"), b"TTTT");
+        assert_eq!(super::reverse_complement(b"ATCG"), b"CGAT");
+        assert_eq!(super::reverse_complement(b"N"), b"N");
+        assert_eq!(super::reverse_complement(b""), b"");
     }
 }
