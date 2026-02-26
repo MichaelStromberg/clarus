@@ -1,6 +1,12 @@
 # Clarus
 
-High-performance genomic variant annotation and VUS resolution engine written in Rust.
+High-performance genomic variant annotator written in Rust.
+
+## Current Status
+
+**Active development.** The build-time pipeline and runtime annotation engine are both functional. On a 3-sample WGS VCF, `clarus` annotates **6,532,915 positions** (6,816,613 variants) in **30.3 s** with **2.8 GB** peak memory.
+
+Currently exploring different mechanisms for indexing and retrieving large quantities of external annotation data as well as building a robust verification infrastructure.
 
 ## Building
 
@@ -151,10 +157,6 @@ Options:
   -r, --runs <N>           Number of runs, median reported (default: 5)
 ```
 
-## Current Status
-
-**Active development.** The build-time pipeline and runtime annotation engine are both functional. On a 3-sample WGS VCF, `clarus` annotates **6,532,915 positions** (6,816,613 variants) in **30.3 s** with **2.8 GB** peak memory.
-
 ### Implemented
 
 - Config-driven pipelines with JSON configuration files
@@ -167,7 +169,6 @@ Options:
 - 102 Sequence Ontology biotype classifications
 - Standard and vertebrate mitochondrial codon translation
 - Selenoprotein detection for relaxed evaluation thresholds
-- BGZF decompression benchmarking (7 approaches, 3 flate2 backends) with parallel rayon strategy selected
 - Streaming VCF parsing with BGZF decompression, header/record/sample parsing, and assembly inference
 - Variant categorization, normalization (bidirectional trim + left-alignment), and VID construction
 - HGVSg genomic notation with right-rotation and duplication detection
