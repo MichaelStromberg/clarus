@@ -51,6 +51,10 @@ cargo fmt -- --check     # Check formatting without modifying
 | `sequence` | RNA and protein sequence dictionaries indexed by transcript/protein ID |
 | `strand` | Forward/reverse strand type with GFF3 parsing and byte serialization |
 | `transcript` | Transcript region construction, coordinate mapping, and intermediate data types |
+| `hgvsg` | HGVSg genomic notation with right-rotation and duplication detection |
+| `json` | JSON output types and streaming gzip writer |
+| `variant` | Variant categorization, normalization (bidirectional trim + left-alignment), VID construction, and type classification |
+| `vcf` | VCF parsing pipeline: BGZF streaming decompression, header/record/sample parsing, INFO field extraction, assembly inference |
 
 ### Reference File Format
 
@@ -98,6 +102,21 @@ For GRCh38: processes 105,006 transcripts (78,422 coding, 26,584 non-coding) wit
 
 Example configuration files are in `configurations/cache/`.
 
+**`clarus`** — High-performance genomic variant annotation engine.
+
+```
+Usage: clarus -i <INPUT> -o <OUTPUT> -d <DATA> --ga <ASSEMBLY> --source <SOURCE>
+
+Options:
+  -i, --input <PATH>        Input VCF file (bgzf-compressed or plain gzip)
+  -o, --output <PATH>       Output prefix (produces <prefix>.json.gz)
+  -d, --data <PATH>         Data root directory
+  --ga <ASSEMBLY>           Genome assembly (GRCh37, GRCh38)
+  --source <SOURCE>         Annotation source (refseq or ensembl)
+```
+
+Reads a VCF file with streaming BGZF decompression, infers assembly from VCF contigs, annotates each variant with VID and HGVSg notation, and writes streaming gzip-compressed JSON output.
+
 ### Benchmarks (`benches/`)
 
 **`bgzf_benchmark`** — Benchmarks BGZF decompression approaches to find the fastest strategy for VCF parsing.
@@ -121,9 +140,20 @@ cargo bench --bench bgzf_benchmark --features bench-zlib-ng -- -i file.vcf.gz --
 
 Results on a 951 MB 3-sample WGS VCF (Apple M3 Max, 14 cores): manual BGZF + libdeflater + rayon achieves **11.4x** speedup over flate2 baseline (0.42s vs 4.76s). Full results in [`docs/clarus/fast_bgzf_parsing.md`](docs/clarus/fast_bgzf_parsing.md).
 
+**`json_serialization`** — Benchmarks JSON serialization approaches for Position structs.
+
+```
+Usage: cargo bench --bench json_serialization -- [-n <ITERATIONS>] [-b <BATCH_SIZE>] [-r <RUNS>]
+
+Options:
+  -n, --iterations <N>     Iterations for single-position benchmark (default: 100,000)
+  -b, --batch-size <N>     Positions in the batch benchmark (default: 10,000)
+  -r, --runs <N>           Number of runs, median reported (default: 5)
+```
+
 ## Current Status
 
-**Active development.** The build-time pipeline is functional: `create_ref` produces reference files and `create_cache` constructs transcript caches with full protein validation. The runtime annotation engine is not yet started.
+**Active development.** The build-time pipeline and runtime annotation engine are both functional. On a 3-sample WGS VCF, `clarus` annotates **6,532,915 positions** (6,816,613 variants) in **30.3 s** with **2.8 GB** peak memory.
 
 ### Implemented
 
@@ -138,6 +168,11 @@ Results on a 951 MB 3-sample WGS VCF (Apple M3 Max, 14 cores): manual BGZF + lib
 - Standard and vertebrate mitochondrial codon translation
 - Selenoprotein detection for relaxed evaluation thresholds
 - BGZF decompression benchmarking (7 approaches, 3 flate2 backends) with parallel rayon strategy selected
+- Streaming VCF parsing with BGZF decompression, header/record/sample parsing, and assembly inference
+- Variant categorization, normalization (bidirectional trim + left-alignment), and VID construction
+- HGVSg genomic notation with right-rotation and duplication detection
+- Streaming gzip-compressed JSON output
+- Annotation engine (`clarus`) tying VCF input through to JSON output
 
 ## License
 
