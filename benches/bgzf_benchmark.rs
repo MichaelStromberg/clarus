@@ -129,9 +129,12 @@ fn main() -> Result<()> {
         )?);
 
         // 4. gzp BgzfSyncReader
-        results.push(run_benchmark("gzp (BgzfSyncReader)", iterations, file_size, || {
-            bench_gzp(input_path)
-        })?);
+        results.push(run_benchmark(
+            "gzp (BgzfSyncReader)",
+            iterations,
+            file_size,
+            || bench_gzp(input_path),
+        )?);
 
         // 5. Manual BGZF + libdeflater (single-threaded)
         results.push(run_benchmark(
@@ -368,9 +371,9 @@ fn bench_manual_rayon(path: &PathBuf) -> Result<RunResult> {
         })
         .collect();
 
-    let (total_bytes, total_lines) = results.iter().fold((0u64, 0u64), |(b, l), (rb, rl)| {
-        (b + rb, l + rl)
-    });
+    let (total_bytes, total_lines) = results
+        .iter()
+        .fold((0u64, 0u64), |(b, l), (rb, rl)| (b + rb, l + rl));
 
     Ok(RunResult {
         elapsed: start.elapsed(),

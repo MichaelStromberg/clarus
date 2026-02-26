@@ -21,6 +21,7 @@ target
 #.idea/
 docs/specifications/
 data/
+output/
 CLAUDE.md
 Cargo.lock
 

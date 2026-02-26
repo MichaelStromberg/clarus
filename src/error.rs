@@ -25,4 +25,12 @@ pub enum Error {
     /// These are excluded from the cache rather than causing a fatal error.
     #[error("unresolvable transcript: {0}")]
     UnresolvableTranscript(String),
+
+    /// A VCF format error was detected.
+    #[error("VCF format error: {0}")]
+    VcfFormat(String),
+
+    /// The VCF assembly does not match the expected assembly.
+    #[error("assembly mismatch: {0}")]
+    AssemblyMismatch(String),
 }

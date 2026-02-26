@@ -143,6 +143,7 @@ impl ReferenceReader {
         reader.read_exact(&mut compressed)?;
 
         let sequence = zstd::decode_all(compressed.as_slice())?;
+        drop(compressed);
 
         // Read cytogenetic bands
         let band_count = reader.read_u8()?;
