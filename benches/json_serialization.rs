@@ -67,18 +67,10 @@ fn make_snv_position(idx: usize) -> Position {
     Position {
         chromosome: "chr1".to_string(),
         position: 100_000 + idx as i64,
-        id: None,
-        repeat_unit: None,
-        ref_repeat_count: None,
-        sv_end: None,
         ref_allele: "A".to_string(),
         alt_alleles: vec!["G".to_string()],
         quality: Some(250.0),
         filters: vec!["PASS".to_string()],
-        ci_pos: None,
-        ci_end: None,
-        sv_length: None,
-        breakend_event_id: None,
         strand_bias: None,
         fisher_strand_bias: Some(2.435),
         mapping_quality: Some(60.0),
@@ -88,63 +80,42 @@ fn make_snv_position(idx: usize) -> Position {
         cytogenetic_band: Some("1p36.33".to_string()),
         samples: vec![
             JsonSample {
-                is_empty: None,
                 genotype: Some("0/1".to_string()),
                 variant_frequencies: Some(vec![0.45]),
                 total_depth: Some(42),
                 genotype_quality: Some(99.0),
-                copy_number: None,
-                minor_haplotype_copy_number: None,
-                repeat_unit_counts: None,
                 allele_depths: Some(vec![23, 19]),
                 failed_filter: false,
-                split_read_counts: None,
-                paired_end_read_counts: None,
                 is_de_novo: false,
                 loss_of_heterozygosity: false,
-                somatic_quality: None,
                 bin_count: None,
                 is_imputed_genotype: None,
                 genotype_dosage: None,
                 genotype_posteriors: None,
             },
             JsonSample {
-                is_empty: None,
                 genotype: Some("0/0".to_string()),
                 variant_frequencies: Some(vec![0.0]),
                 total_depth: Some(38),
                 genotype_quality: Some(99.0),
-                copy_number: None,
-                minor_haplotype_copy_number: None,
-                repeat_unit_counts: None,
                 allele_depths: Some(vec![38, 0]),
                 failed_filter: false,
-                split_read_counts: None,
-                paired_end_read_counts: None,
                 is_de_novo: false,
                 loss_of_heterozygosity: false,
-                somatic_quality: None,
                 bin_count: None,
                 is_imputed_genotype: None,
                 genotype_dosage: None,
                 genotype_posteriors: None,
             },
             JsonSample {
-                is_empty: None,
                 genotype: Some("0/1".to_string()),
                 variant_frequencies: Some(vec![0.52]),
                 total_depth: Some(31),
                 genotype_quality: Some(89.0),
-                copy_number: None,
-                minor_haplotype_copy_number: None,
-                repeat_unit_counts: None,
                 allele_depths: Some(vec![15, 16]),
                 failed_filter: false,
-                split_read_counts: None,
-                paired_end_read_counts: None,
                 is_de_novo: false,
                 loss_of_heterozygosity: false,
-                somatic_quality: None,
                 bin_count: None,
                 is_imputed_genotype: None,
                 genotype_dosage: None,
@@ -156,7 +127,6 @@ fn make_snv_position(idx: usize) -> Position {
             chromosome: "chr1".to_string(),
             begin: 100_000 + idx as i64,
             end: 100_001 + idx as i64,
-            is_structural_variant: false,
             ref_allele: "A".to_string(),
             alt_allele: "G".to_string(),
             variant_type: VariantType::Snv,
@@ -169,18 +139,10 @@ fn make_indel_position(idx: usize) -> Position {
     Position {
         chromosome: "chr2".to_string(),
         position: 200_000 + idx as i64,
-        id: Some(format!("rs{}", 10_000 + idx)),
-        repeat_unit: None,
-        ref_repeat_count: None,
-        sv_end: None,
         ref_allele: "ATCG".to_string(),
         alt_alleles: vec!["A".to_string()],
         quality: Some(180.5),
         filters: vec!["PASS".to_string()],
-        ci_pos: None,
-        ci_end: None,
-        sv_length: None,
-        breakend_event_id: None,
         strand_bias: Some(1.23),
         fisher_strand_bias: Some(3.12),
         mapping_quality: Some(55.0),
@@ -190,63 +152,42 @@ fn make_indel_position(idx: usize) -> Position {
         cytogenetic_band: Some("2p25.3".to_string()),
         samples: vec![
             JsonSample {
-                is_empty: None,
                 genotype: Some("0/1".to_string()),
                 variant_frequencies: Some(vec![0.33]),
                 total_depth: Some(55),
                 genotype_quality: Some(95.0),
-                copy_number: None,
-                minor_haplotype_copy_number: None,
-                repeat_unit_counts: None,
                 allele_depths: Some(vec![37, 18]),
                 failed_filter: false,
-                split_read_counts: None,
-                paired_end_read_counts: None,
                 is_de_novo: false,
                 loss_of_heterozygosity: false,
-                somatic_quality: None,
                 bin_count: None,
                 is_imputed_genotype: None,
                 genotype_dosage: None,
                 genotype_posteriors: None,
             },
             JsonSample {
-                is_empty: None,
                 genotype: Some("0/0".to_string()),
                 variant_frequencies: Some(vec![0.0]),
                 total_depth: Some(40),
                 genotype_quality: Some(99.0),
-                copy_number: None,
-                minor_haplotype_copy_number: None,
-                repeat_unit_counts: None,
                 allele_depths: Some(vec![40, 0]),
                 failed_filter: false,
-                split_read_counts: None,
-                paired_end_read_counts: None,
                 is_de_novo: false,
                 loss_of_heterozygosity: false,
-                somatic_quality: None,
                 bin_count: None,
                 is_imputed_genotype: None,
                 genotype_dosage: None,
                 genotype_posteriors: None,
             },
             JsonSample {
-                is_empty: None,
                 genotype: Some("0/1".to_string()),
                 variant_frequencies: Some(vec![0.48]),
                 total_depth: Some(29),
                 genotype_quality: Some(78.0),
-                copy_number: None,
-                minor_haplotype_copy_number: None,
-                repeat_unit_counts: None,
                 allele_depths: Some(vec![15, 14]),
                 failed_filter: false,
-                split_read_counts: None,
-                paired_end_read_counts: None,
                 is_de_novo: false,
                 loss_of_heterozygosity: false,
-                somatic_quality: None,
                 bin_count: None,
                 is_imputed_genotype: None,
                 genotype_dosage: None,
@@ -258,7 +199,6 @@ fn make_indel_position(idx: usize) -> Position {
             chromosome: "chr2".to_string(),
             begin: 200_000 + idx as i64,
             end: 200_004 + idx as i64,
-            is_structural_variant: false,
             ref_allele: "ATCG".to_string(),
             alt_allele: "A".to_string(),
             variant_type: VariantType::Deletion,
@@ -349,17 +289,6 @@ fn write_f64_array(buf: &mut Vec<u8>, arr: &[f64]) {
     buf.push(b']');
 }
 
-fn write_i64_array(buf: &mut Vec<u8>, arr: &[i64]) {
-    buf.push(b'[');
-    for (i, &v) in arr.iter().enumerate() {
-        if i > 0 {
-            buf.push(b',');
-        }
-        write_i64(buf, v);
-    }
-    buf.push(b']');
-}
-
 fn write_i32_array(buf: &mut Vec<u8>, arr: &[i32]) {
     buf.push(b'[');
     for (i, &v) in arr.iter().enumerate() {
@@ -409,9 +338,6 @@ fn write_sample_manual(buf: &mut Vec<u8>, sample: &JsonSample) {
         };
     }
 
-    if let Some(v) = sample.is_empty {
-        field!("isEmpty", write_bool(buf, v));
-    }
     if let Some(ref v) = sample.genotype {
         field!("genotype", write_json_string(buf, v));
     }
@@ -424,35 +350,17 @@ fn write_sample_manual(buf: &mut Vec<u8>, sample: &JsonSample) {
     if let Some(v) = sample.genotype_quality {
         field!("genotypeQuality", write_f64(buf, v));
     }
-    if let Some(v) = sample.copy_number {
-        field!("copyNumber", write_i32(buf, v));
-    }
-    if let Some(v) = sample.minor_haplotype_copy_number {
-        field!("minorHaplotypeCopyNumber", write_i32(buf, v));
-    }
-    if let Some(ref v) = sample.repeat_unit_counts {
-        field!("repeatUnitCounts", write_i32_array(buf, v));
-    }
     if let Some(ref v) = sample.allele_depths {
         field!("alleleDepths", write_i32_array(buf, v));
     }
     if sample.failed_filter {
         field!("failedFilter", write_bool(buf, true));
     }
-    if let Some(ref v) = sample.split_read_counts {
-        field!("splitReadCounts", write_i32_array(buf, v));
-    }
-    if let Some(ref v) = sample.paired_end_read_counts {
-        field!("pairedEndReadCounts", write_i32_array(buf, v));
-    }
     if sample.is_de_novo {
         field!("isDeNovo", write_bool(buf, true));
     }
     if sample.loss_of_heterozygosity {
         field!("lossOfHeterozygosity", write_bool(buf, true));
-    }
-    if let Some(v) = sample.somatic_quality {
-        field!("somaticQuality", write_f64(buf, v));
     }
     if let Some(v) = sample.bin_count {
         field!("binCount", write_i32(buf, v));
@@ -491,13 +399,6 @@ fn write_variant_manual(buf: &mut Vec<u8>, variant: &JsonVariant) {
     write_json_string(buf, "end");
     buf.push(b':');
     write_i64(buf, variant.end);
-
-    if variant.is_structural_variant {
-        buf.push(b',');
-        write_json_string(buf, "isStructuralVariant");
-        buf.push(b':');
-        write_bool(buf, true);
-    }
 
     buf.push(b',');
     write_json_string(buf, "refAllele");
@@ -538,38 +439,6 @@ fn write_position_manual(buf: &mut Vec<u8>, pos: &Position) {
     buf.push(b':');
     write_i64(buf, pos.position);
 
-    // id
-    if let Some(ref v) = pos.id {
-        buf.push(b',');
-        write_json_string(buf, "id");
-        buf.push(b':');
-        write_json_string(buf, v);
-    }
-
-    // repeatUnit
-    if let Some(ref v) = pos.repeat_unit {
-        buf.push(b',');
-        write_json_string(buf, "repeatUnit");
-        buf.push(b':');
-        write_json_string(buf, v);
-    }
-
-    // refRepeatCount
-    if let Some(v) = pos.ref_repeat_count {
-        buf.push(b',');
-        write_json_string(buf, "refRepeatCount");
-        buf.push(b':');
-        write_i32(buf, v);
-    }
-
-    // svEnd
-    if let Some(v) = pos.sv_end {
-        buf.push(b',');
-        write_json_string(buf, "svEnd");
-        buf.push(b':');
-        write_i64(buf, v);
-    }
-
     // refAllele
     buf.push(b',');
     write_json_string(buf, "refAllele");
@@ -596,38 +465,6 @@ fn write_position_manual(buf: &mut Vec<u8>, pos: &Position) {
         write_json_string(buf, "filters");
         buf.push(b':');
         write_string_array(buf, &pos.filters);
-    }
-
-    // ciPos
-    if let Some(ref v) = pos.ci_pos {
-        buf.push(b',');
-        write_json_string(buf, "ciPos");
-        buf.push(b':');
-        write_i64_array(buf, v);
-    }
-
-    // ciEnd
-    if let Some(ref v) = pos.ci_end {
-        buf.push(b',');
-        write_json_string(buf, "ciEnd");
-        buf.push(b':');
-        write_i64_array(buf, v);
-    }
-
-    // svLength
-    if let Some(v) = pos.sv_length {
-        buf.push(b',');
-        write_json_string(buf, "svLength");
-        buf.push(b':');
-        write_i64(buf, v);
-    }
-
-    // breakendEventId
-    if let Some(ref v) = pos.breakend_event_id {
-        buf.push(b',');
-        write_json_string(buf, "breakendEventId");
-        buf.push(b':');
-        write_json_string(buf, v);
     }
 
     // strandBias

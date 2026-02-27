@@ -15,8 +15,10 @@ use clarus::chromosome::Chromosome;
 use clarus::cli;
 use clarus::genome_assembly::GenomeAssembly;
 use clarus::hgvsg;
-use clarus::json::types::{DataSource, Header, JsonSample, JsonVariant, Position};
-use clarus::json::writer::JsonWriter;
+use clarus::json::types::{
+    AnnotationStats, DataSource, InputInfo, JsonSample, JsonVariant, Metadata, Position,
+};
+use clarus::json::writer::OutputWriter;
 use clarus::perf;
 use clarus::reference::reader::{ChromosomeData, ReferenceReader};
 use clarus::variant::categorize;
@@ -36,7 +38,7 @@ struct Cli {
     #[arg(short = 'i', long = "input")]
     input: PathBuf,
 
-    /// Output prefix (produces <prefix>.json.gz)
+    /// Output prefix (produces <prefix>_metadata.json.gz, <prefix>_variants.jsonl.gz, <prefix>_genes.jsonl.gz)
     #[arg(short = 'o', long = "output")]
     output: PathBuf,
 
@@ -131,23 +133,19 @@ fn main() -> Result<()> {
     // ── Annotate & Write JSON ────────────────────────────
     cli::section("Annotation");
 
-    let output_path = PathBuf::from(format!("{}.json.gz", cli_args.output.display()));
-    let mut writer = JsonWriter::new(&output_path)?;
+    let mut writer = OutputWriter::new(&cli_args.output)?;
 
-    let header = Header {
-        annotator: "Clarus 0.1.0".to_string(),
-        creation_time: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-        genome_assembly: assembly.to_string(),
-        schema_version: 6,
-        data_sources: vec![DataSource {
-            name: "Reference".to_string(),
-            version: format!("{}.p{}", assembly, ref_reader.patch_level),
-            description: None,
-            release_date: None,
-        }],
-        samples: vcf.header.sample_names.clone(),
+    let input_info = InputInfo {
+        file_name: cli_args
+            .input
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        vcf_version: vcf.header.file_format.clone(),
+        contigs: vcf.header.contigs.len(),
+        samples: vcf.header.sample_names.len(),
+        inferred_assembly: vcf.inferred_assembly.to_string(),
     };
-    writer.write_header(&header)?;
 
     let mut current_chrom_index: Option<usize> = None;
     let mut current_chrom_data: Option<ChromosomeData> = None;
@@ -209,28 +207,15 @@ fn main() -> Result<()> {
             record.samples.into_iter().map(JsonSample::from).collect();
 
         let cyto_band = find_cytogenetic_band(chrom_data, record.position).map(str::to_string);
-        let sv_end = if record.info.svtype.is_some() {
-            record.info.end
-        } else {
-            None
-        };
 
         // Build Position, moving remaining owned fields (zero clones)
         let position = Position {
             chromosome: ensembl_name.to_string(),
             position: record.position,
-            id: record.id,
-            repeat_unit: record.info.repeat_unit,
-            ref_repeat_count: record.info.ref_repeat_count,
-            sv_end,
             ref_allele: record.ref_allele,
             alt_alleles: record.alt_alleles,
             quality: record.quality,
             filters: record.filters,
-            ci_pos: record.info.cipos.map(|(a, b)| vec![a, b]),
-            ci_end: record.info.ciend.map(|(a, b)| vec![a, b]),
-            sv_length: record.info.svlen,
-            breakend_event_id: record.info.event,
             strand_bias: record.info.strand_bias,
             fisher_strand_bias: record.info.fisher_strand_bias,
             mapping_quality: record.info.mapping_quality,
@@ -247,7 +232,26 @@ fn main() -> Result<()> {
         positions_written += 1;
     }
 
-    writer.finish()?;
+    let metadata = Metadata {
+        annotator: "Clarus 0.1.0".to_string(),
+        creation_time: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        genome_assembly: assembly.to_string(),
+        schema_version: 1,
+        data_sources: vec![DataSource {
+            name: "Reference".to_string(),
+            version: format!("{}.p{}", assembly, ref_reader.patch_level),
+            description: None,
+            release_date: None,
+        }],
+        samples: vcf.header.sample_names.clone(),
+        input: input_info,
+        stats: AnnotationStats {
+            positions: positions_written,
+            variants: variants_written,
+            skipped_records: skipped_chroms,
+        },
+    };
+    writer.finish(&metadata)?;
 
     cli::kv("Positions", &cli::num(positions_written));
     cli::kv("Variants", &cli::num(variants_written));
@@ -257,7 +261,10 @@ fn main() -> Result<()> {
             cli::num(skipped_chroms)
         ));
     }
-    cli::success(&format!("Wrote {}", output_path.display()));
+    let prefix_str = cli_args.output.display().to_string();
+    cli::success(&format!("Wrote {prefix_str}_metadata.json.gz"));
+    cli::success(&format!("Wrote {prefix_str}_variants.jsonl.gz"));
+    cli::success(&format!("Wrote {prefix_str}_genes.jsonl.gz"));
     eprintln!();
 
     // ── Summary ──────────────────────────────────────────
@@ -439,17 +446,11 @@ fn annotate_alt<'a>(
         normalized.alt_allele.into_owned()
     };
 
-    let is_sv = matches!(
-        categorized.category,
-        VariantCategory::Sv | VariantCategory::Cnv | VariantCategory::RepeatExpansion
-    );
-
     JsonVariant {
         vid: variant_id,
         chromosome: ensembl_name.to_string(),
         begin,
         end,
-        is_structural_variant: is_sv,
         ref_allele: display_ref,
         alt_allele: display_alt,
         variant_type: categorized.variant_type,

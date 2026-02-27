@@ -4,27 +4,41 @@ use serde::Serialize;
 
 use crate::variant::types::VariantType;
 
-/// Top-level JSON output structure.
+/// Metadata written to `{prefix}_metadata.json.gz`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AnnotationOutput {
-    pub header: Header,
-    pub positions: Vec<Position>,
-}
-
-/// The JSON header section.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Header {
+pub struct Metadata {
     pub annotator: String,
     pub creation_time: String,
     pub genome_assembly: String,
     pub schema_version: u32,
     pub data_sources: Vec<DataSource>,
     pub samples: Vec<String>,
+    pub input: InputInfo,
+    pub stats: AnnotationStats,
 }
 
-/// A data source referenced in the header.
+/// VCF input provenance.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InputInfo {
+    pub file_name: String,
+    pub vcf_version: String,
+    pub contigs: usize,
+    pub samples: usize,
+    pub inferred_assembly: String,
+}
+
+/// Annotation statistics, filled after the annotation loop completes.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnotationStats {
+    pub positions: u64,
+    pub variants: u64,
+    pub skipped_records: u64,
+}
+
+/// A data source referenced in the metadata.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DataSource {
@@ -36,34 +50,30 @@ pub struct DataSource {
     pub release_date: Option<String>,
 }
 
+/// One per line in the genes JSONL file.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Gene {
+    pub name: String,
+    pub hgnc_id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ncbi_gene_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ensembl_gene_id: Option<String>,
+}
+
 /// A single genomic position (one VCF record).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Position {
     pub chromosome: String,
     pub position: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repeat_unit: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ref_repeat_count: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sv_end: Option<i64>,
     pub ref_allele: String,
     pub alt_alleles: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quality: Option<f64>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub filters: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ci_pos: Option<Vec<i64>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ci_end: Option<Vec<i64>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sv_length: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub breakend_event_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strand_bias: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -87,8 +97,6 @@ pub struct Position {
 #[serde(rename_all = "camelCase")]
 pub struct JsonSample {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_empty: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub genotype: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variant_frequencies: Option<Vec<f64>>,
@@ -97,25 +105,13 @@ pub struct JsonSample {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub genotype_quality: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub copy_number: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub minor_haplotype_copy_number: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repeat_unit_counts: Option<Vec<i32>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub allele_depths: Option<Vec<i32>>,
     #[serde(skip_serializing_if = "is_false")]
     pub failed_filter: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub split_read_counts: Option<Vec<i32>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub paired_end_read_counts: Option<Vec<i32>>,
     #[serde(skip_serializing_if = "is_false")]
     pub is_de_novo: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub loss_of_heterozygosity: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub somatic_quality: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bin_count: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,8 +130,6 @@ pub struct JsonVariant {
     pub chromosome: String,
     pub begin: i64,
     pub end: i64,
-    #[serde(skip_serializing_if = "is_false")]
-    pub is_structural_variant: bool,
     pub ref_allele: String,
     pub alt_allele: String,
     pub variant_type: VariantType,
@@ -150,21 +144,14 @@ fn is_false(v: &bool) -> bool {
 impl From<crate::vcf::sample::VcfSample> for JsonSample {
     fn from(s: crate::vcf::sample::VcfSample) -> Self {
         Self {
-            is_empty: if s.is_empty { Some(true) } else { None },
             genotype: s.genotype,
             variant_frequencies: s.variant_frequencies,
             total_depth: s.total_depth,
             genotype_quality: s.genotype_quality,
-            copy_number: s.copy_number,
-            minor_haplotype_copy_number: s.minor_haplotype_copy_number,
-            repeat_unit_counts: s.repeat_unit_counts,
             allele_depths: s.allele_depths,
             failed_filter: s.failed_filter,
-            split_read_counts: s.split_read_counts,
-            paired_end_read_counts: s.paired_end_read_counts,
             is_de_novo: s.is_de_novo,
             loss_of_heterozygosity: s.loss_of_heterozygosity,
-            somatic_quality: s.somatic_quality,
             bin_count: s.bin_count,
             is_imputed_genotype: None,
             genotype_dosage: s.genotype_dosage,
