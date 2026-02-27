@@ -77,7 +77,7 @@ fn make_snv_position(idx: usize) -> Position {
         impute_score: None,
         allele_frequency: None,
         ref_panel_allele_frequency: None,
-        cytogenetic_band: Some("1p36.33".to_string()),
+        locus: Some("1p36.33".to_string()),
         samples: vec![
             JsonSample {
                 genotype: Some("0/1".to_string()),
@@ -149,7 +149,7 @@ fn make_indel_position(idx: usize) -> Position {
         impute_score: None,
         allele_frequency: None,
         ref_panel_allele_frequency: None,
-        cytogenetic_band: Some("2p25.3".to_string()),
+        locus: Some("2p25.3".to_string()),
         samples: vec![
             JsonSample {
                 genotype: Some("0/1".to_string()),
@@ -515,10 +515,10 @@ fn write_position_manual(buf: &mut Vec<u8>, pos: &Position) {
         write_f64_array(buf, v);
     }
 
-    // cytogeneticBand
-    if let Some(ref v) = pos.cytogenetic_band {
+    // locus
+    if let Some(ref v) = pos.locus {
         buf.push(b',');
-        write_json_string(buf, "cytogeneticBand");
+        write_json_string(buf, "locus");
         buf.push(b':');
         write_json_string(buf, v);
     }

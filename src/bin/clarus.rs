@@ -206,7 +206,7 @@ fn main() -> Result<()> {
         let json_samples: Vec<JsonSample> =
             record.samples.into_iter().map(JsonSample::from).collect();
 
-        let cyto_band = find_cytogenetic_band(chrom_data, record.position).map(str::to_string);
+        let locus = find_locus(chrom_data, record.position).map(str::to_string);
 
         // Build Position, moving remaining owned fields (zero clones)
         let position = Position {
@@ -222,7 +222,7 @@ fn main() -> Result<()> {
             impute_score: record.info.impute_score,
             allele_frequency: record.info.af,
             ref_panel_allele_frequency: record.info.raf,
-            cytogenetic_band: cyto_band,
+            locus,
             samples: json_samples,
             variants: json_variants,
         };
@@ -458,8 +458,8 @@ fn annotate_alt<'a>(
     }
 }
 
-/// Find the cytogenetic band containing the given position (binary search).
-fn find_cytogenetic_band(chrom_data: &ChromosomeData, position: i64) -> Option<&str> {
+/// Find the cytogenetic band (locus) containing the given position (binary search).
+fn find_locus(chrom_data: &ChromosomeData, position: i64) -> Option<&str> {
     let pos = position as u32;
     let bands = &chrom_data.bands;
 

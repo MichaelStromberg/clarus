@@ -87,7 +87,7 @@ pub struct Position {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ref_panel_allele_frequency: Option<Vec<f64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cytogenetic_band: Option<String>,
+    pub locus: Option<String>,
     pub samples: Vec<JsonSample>,
     pub variants: Vec<JsonVariant>,
 }
